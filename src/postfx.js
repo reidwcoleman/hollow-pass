@@ -9,7 +9,7 @@ export class PostFX {
   constructor(canvas, scene, camera) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: 'high-performance', stencil: false, depth: true });
     const r = this.renderer;
-    r.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    r.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     r.outputColorSpace = THREE.SRGBColorSpace;
     r.toneMapping = THREE.ACESFilmicToneMapping;
     r.toneMappingExposure = 1.15;
@@ -36,11 +36,19 @@ export class PostFX {
   }
   resize() {
     const w = window.innerWidth, h = window.innerHeight;
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2) * this.scale);
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5) * this.scale);
     this.composer.setSize(w, h);
     this.camera.aspect = w / h;
     this.camera.updateProjectionMatrix();
   }
+  /** Momentary lens/sensor glitch: chromatic aberration and grain spike, decays over ~0.5 s. */
+  setGlitch(strength) { this.glitch = Math.max(this.glitch || 0, strength); }
+  tick(dt) {
+    this.glitch = (this.glitch || 0) * Math.exp(-dt * 5);
+    const g = this.glitch;
+    this.ca.offset.set(0.0009 + g * 0.012, 0.0006 + g * 0.008);
+    this.noise.blendMode.opacity.value = 0.11 + g * 0.6;
+  }
   setScale(s) { this.scale = THREE.MathUtils.clamp(s, 0.5, 1); this.resize(); }
-  render(dt) { this.renderer.info.reset(); this.composer.render(dt); }
+  render(dt) { this.tick(dt); this.renderer.info.reset(); this.composer.render(dt); }
 }

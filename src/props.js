@@ -53,6 +53,37 @@ export function boxRibbon(road, a, b, offset, width, yTop, yBot) {
   return g;
 }
 
+/**
+ * Branch-card spruce: trunk + tiers of radially arranged, downward-tilted
+ * quads that carry the needle texture (alpha tested). Reads far more like a
+ * real tree than stacked cones, at ~90 triangles.
+ */
+export function spruceCardGeometry() {
+  const trunk = new THREE.CylinderGeometry(0.07, 0.24, 9.0, 7);
+  trunk.translate(0, 4.5, 0);
+  const cards = [];
+  const tiers = 10;
+  for (let i = 0; i < tiers; i++) {
+    const t = i / (tiers - 1);
+    const y = 0.9 + t * 7.9;
+    const reach = (1 - t) * 1.9 + 0.3;
+    const n = i < 3 ? 6 : i < 7 ? 5 : 4;
+    const tilt = 0.75 + t * 0.35;
+    for (let k = 0; k < n; k++) {
+      const a = (k / n) * Math.PI * 2 + i * 0.9;
+      const g = new THREE.PlaneGeometry(reach * 0.95, reach, 1, 2);
+      g.translate(0, reach / 2, 0);
+      g.rotateX(-Math.PI / 2 + tilt);
+      g.rotateY(a);
+      g.translate(0, y, 0);
+      cards.push(g);
+    }
+  }
+  const top = new THREE.PlaneGeometry(0.45, 1.1); top.translate(0, 9.2, 0); cards.push(top);
+  const top2 = top.clone(); top2.rotateY(Math.PI / 2); cards.push(top2);
+  return { trunk, cards: merge(cards) };
+}
+
 /** Snow-laden spruce: trunk + tiers of cones. Returns {foliage, snow, trunk} geometries in a local frame (base at y=0). */
 export function spruceGeometry() {
   const trunk = new THREE.CylinderGeometry(0.12, 0.28, 3.2, 7);

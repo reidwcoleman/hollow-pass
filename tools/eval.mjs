@@ -1,7 +1,7 @@
 // node tools/eval.mjs "js" — evaluate in the loaded game and print the result
 import puppeteer from 'puppeteer-core';
 const script = process.argv[2];
-const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new',
+const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', protocolTimeout: 600000,
   args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist', '--window-size=1440,860', '--autoplay-policy=no-user-gesture-required'], defaultViewport: { width: 1440, height: 860 } });
 const page = await browser.newPage();
 const logs = [];

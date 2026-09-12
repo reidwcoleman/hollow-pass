@@ -5,6 +5,16 @@ import { signTexture } from './textures.js';
 import { mulberry32, clamp } from './noise.js';
 
 const up = new THREE.Vector3(0, 1, 0);
+/** Group-local (lx,lz) -> world circle, for groups rotated about Y. */
+function circ(g, lx, lz, r, kind = 'building') {
+  const c = Math.cos(g.rotation.y), sn = Math.sin(g.rotation.y);
+  return { x: g.position.x + c * lx + sn * lz, z: g.position.z - sn * lx + c * lz, r, kind };
+}
+function wallCircles(g, x0, z0, x1, z1, r, kind = 'building') {
+  const out = [], len = Math.hypot(x1 - x0, z1 - z0), n = Math.max(1, Math.ceil(len / (r * 1.4)));
+  for (let i = 0; i <= n; i++) { const t = i / n; out.push(circ(g, x0 + (x1 - x0) * t, z0 + (z1 - z0) * t, r, kind)); }
+  return out;
+}
 
 /** Places a group at road station s, offset laterally (left +), aligned to the road tangent. */
 export function placeAlong(obj, road, s, lateral, yOff = 0, yaw = 0) {
@@ -180,6 +190,13 @@ export function buildTunnel(road, terrain, mats) {
       fixtures.push({ pos: wp.clone().add(new THREE.Vector3(0, -0.3, 0)), color: new THREE.Color(0xffa040), intensity: 120, range: 24, flicker: side > 0 ? 'sodium' : 'steady', bulb: lamp });
     }
   }
+  const obstacles = [];
+  for (const [i, dir] of [[a, -1], [b, 1]]) {
+    const sp = road.samples[((i % N) + N) % N];
+    const yaw = Math.atan2(sp.tx, sp.tz);
+    const fake = { position: new THREE.Vector3(sp.x, sp.y, sp.z), rotation: { y: yaw } };
+    for (const side of [-1, 1]) obstacles.push(...wallCircles(fake, side * (R + 0.6), -1.2, side * (R + 7), -1.2, 1.2));
+  }
   // the one who waits at the far portal (events.js moves it)
   const fig = figureMesh();
   const sOut = road.samples[(b + 6) % N];
@@ -187,7 +204,7 @@ export function buildTunnel(road, terrain, mats) {
   fig.rotation.y = Math.atan2(sOut.tx, sOut.tz) + Math.PI;
   fig.visible = false;
   g.add(fig);
-  return { group: g, fixtures, figure: fig };
+  return { group: g, fixtures, figure: fig, obstacles };
 }
 
 /** Last Chance Gas: canopy, pumps, kiosk, a sign with dead letters, one buzzing tube. */
@@ -254,7 +271,13 @@ export function buildGasStation(road, terrain, mats, s, side) {
     b.position.set(8 + rnd() * 6, 0.45, -8 + rnd() * 5); b.rotation.z = rnd() > 0.7 ? Math.PI / 2 : 0; b.castShadow = true; g.add(b);
   }
   g.userData.wreck = wreck; g.userData.domeLight = domeLight;
-  return { group: g, fixtures, pad: { x: cx, z: cz, r: 26, y: cy } };
+  const obstacles = [];
+  for (const [x, z] of [[-6, -3.5], [6, -3.5], [-6, 3.5], [6, 3.5]]) obstacles.push(circ(g, x, z, 0.4));
+  for (const x of [-3, 3]) obstacles.push(circ(g, x, 0, 1.0));
+  obstacles.push(...wallCircles(g, -7, -10, 7, -10, 3.2));
+  obstacles.push(circ(g, 14, 8, 0.4));
+  obstacles.push(circ(g, -11 + Math.sin(0.9) * 1.2, 4 + Math.cos(0.9) * 1.2, 1.2), circ(g, -11 - Math.sin(0.9) * 1.2, 4 - Math.cos(0.9) * 1.2, 1.2));
+  return { group: g, fixtures, pad: { x: cx, z: cz, r: 26, y: cy }, obstacles };
 }
 
 /** Hallow Chapel cemetery: iron fence, leaning headstones, a roofless stone chapel, one lantern. */
@@ -321,7 +344,13 @@ export function buildCemetery(road, terrain, mats, s, side) {
   // sign at the road
   const sign = signMesh(signTexture(['HALLOW CHAPEL', 'cemetery'], { bg: '#2a2a28', fg: '#d6d0bd', w: 512, h: 200 }), 2.2, 0.9, 1.6, mats);
   placeAlong(sign, road, s - 30, side * 6.5, 0, side > 0 ? 0 : Math.PI);
-  return { group: g, fixtures, pad: { x: cx, z: cz, r: 26, y: cy + 0.4 }, sign };
+  const obstacles = [];
+  for (let e = 0; e < 4; e++) { const [x0, z0] = ring[e], [x1, z1] = ring[(e + 1) % 4]; obstacles.push(...wallCircles(g, x0, z0, x1, z1, 0.35, 'fence')); }
+  obstacles.push(circ(g, 6, 4, 5.0));
+  obstacles.push(circ(g, sign.position.x, sign.position.z, 0, 'none'));
+  obstacles.pop();
+  obstacles.push({ x: sign.position.x, z: sign.position.z, r: 0.25, kind: 'sign' });
+  return { group: g, fixtures, pad: { x: cx, z: cz, r: 26, y: cy + 0.4 }, sign, obstacles };
 }
 
 /** Overlook: stone parapet on the valley side, an interpretive sign, and the summit mast up the hill. */
@@ -342,7 +371,8 @@ export function buildOverlook(road, terrain, mats, s, side, elevation) {
   // coin telescope
   const tp = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.09, 1.3, 8), mats.iron); tp.position.set(9, 0.65, side * 3.2); g.add(tp);
   const tt = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.09, 0.7, 10), mats.iron); tt.rotation.x = side * Math.PI / 2 - 0.2; tt.position.set(9, 1.35, side * 3.4); g.add(tt);
-  return { group: g, fixtures, pad: { x: cx, z: cz, r: 24, y: cy + 0.15 } };
+  const obstacles = [...wallCircles(g, -20, side * 4.2, 20, side * 4.2, 0.5), circ(g, 4, side * 2.8, 0.7), circ(g, 9, side * 3.2, 0.3), circ(g, -8, side * 3.2, 0.3, 'sign')];
+  return { group: g, fixtures, pad: { x: cx, z: cz, r: 24, y: cy + 0.15 }, obstacles };
 }
 
 export function buildTower(terrain, mats, x, z) {

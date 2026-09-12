@@ -3,6 +3,7 @@
  * intake noise driven by rpm/throttle), wind that rises with speed, tyre roar
  * per surface, a slow dread drone, and one-shot cues for the scares.
  */
+const clamp01 = (x) => Math.min(1, Math.max(0, x));
 export class GameAudio {
   constructor() { this.ctx = null; this.started = false; }
   start() {
@@ -72,7 +73,7 @@ export class GameAudio {
     const base = 28 + rpm * 95;
     for (const { o, mult } of this.oscs) o.frequency.setTargetAtTime(base * mult, t, 0.03);
     this.engLP.frequency.setTargetAtTime(500 + rpm * 1800 + thr * 900, t, 0.05);
-    this.eng.gain.setTargetAtTime(0.10 + rpm * 0.12 + thr * 0.08, t, 0.05);
+    this.eng.gain.setTargetAtTime(ctx.stalled ? 0.0 : 0.10 + rpm * 0.12 + thr * 0.08, t, 0.05);
     this.intake.gain.setTargetAtTime(thr * 0.10 + rpm * 0.02, t, 0.05);
     this.intakeF.frequency.setTargetAtTime(300 + rpm * 900, t, 0.05);
     this.wind.gain.setTargetAtTime(Math.min(0.4, spd * spd * 0.00012) + 0.03, t, 0.1);
@@ -95,6 +96,17 @@ export class GameAudio {
     o.frequency.setValueAtTime(55, t); o.frequency.exponentialRampToValueAtTime(30, t + 0.18);
     g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
     o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.25);
+  }
+  /** Collision thud: low impact + short metallic crunch scaled by strength (0..1). */
+  thud(strength = 0.5) {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime, v = clamp01(strength);
+    const o = C.createOscillator(); o.type = 'sine'; o.frequency.setValueAtTime(90 + v * 40, t); o.frequency.exponentialRampToValueAtTime(35, t + 0.25);
+    const g = C.createGain(); g.gain.setValueAtTime(0.5 * v + 0.08, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t + 0.4);
+    const n = this._noise(); const f = C.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1800 + v * 1500; f.Q.value = 0.7;
+    const ng = C.createGain(); ng.gain.setValueAtTime(0.35 * v, t); ng.gain.exponentialRampToValueAtTime(0.001, t + 0.12 + v * 0.2);
+    n.connect(f); f.connect(ng); ng.connect(this.master); setTimeout(() => n.stop(), 600);
   }
   /** Bass hit + metallic ring for a scare. */
   sting(power = 1) {
@@ -119,6 +131,47 @@ export class GameAudio {
       const g = C.createGain(); g.gain.setValueAtTime(v, t); g.gain.exponentialRampToValueAtTime(0.001, t + d);
       o.connect(g); g.connect(this.conv); g.connect(this.master); o.start(t); o.stop(t + d + 0.1);
     }
+  }
+  /** Passing vehicle: filtered noise swell with a falling pitch. */
+  whoosh(v = 0.6) {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    const n = this._noise(); const f = C.createBiquadFilter(); f.type = 'bandpass'; f.Q.value = 0.9;
+    f.frequency.setValueAtTime(900, t); f.frequency.exponentialRampToValueAtTime(220, t + 0.9);
+    const g = C.createGain(); g.gain.setValueAtTime(0.001, t); g.gain.exponentialRampToValueAtTime(0.5 * v, t + 0.25); g.gain.exponentialRampToValueAtTime(0.001, t + 1.1);
+    n.connect(f); f.connect(g); g.connect(this.master); setTimeout(() => n.stop(), 1300);
+  }
+  /** Starter motor cranking, then the engine catches. */
+  starter(sec = 1.6) {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    for (let i = 0; i < sec * 9; i++) {
+      const o = C.createOscillator(); o.type = 'square'; o.frequency.value = 70 + (i % 3) * 8;
+      const g = C.createGain(); const st = t + i / 9; g.gain.setValueAtTime(0.09, st); g.gain.exponentialRampToValueAtTime(0.001, st + 0.08);
+      o.connect(g); g.connect(this.master); o.start(st); o.stop(st + 0.1);
+    }
+  }
+  /** Something hits the glass. */
+  slap() {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    const n = this._noise(); const f = C.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 1400;
+    const g = C.createGain(); g.gain.setValueAtTime(0.7, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.09);
+    n.connect(f); f.connect(g); g.connect(this.master); setTimeout(() => n.stop(), 200);
+    this.thump(0.5);
+  }
+  /** Radio voice through the static: browser speech synthesis, pitched down and slowed. */
+  say(text) {
+    try {
+      if (!('speechSynthesis' in window)) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 0.72; u.pitch = 0.15; u.volume = 0.55;
+      const voices = speechSynthesis.getVoices();
+      const pick = voices.find((v) => /en/i.test(v.lang) && /male|daniel|alex|fred|david|google uk english male/i.test(v.name)) || voices.find((v) => /en/i.test(v.lang));
+      if (pick) u.voice = pick;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(u);
+    } catch (e) { /* no voice, no problem */ }
   }
   horn() {
     if (!this.started) return;

@@ -23,6 +23,8 @@
   @keyframes loc { 0% { opacity: 0; transform: translate(-50%, 8px);} 12% { opacity: 1; transform: translate(-50%, 0);} 80% { opacity: 1;} 100% { opacity: 0;} }
   #locName { font-size: 34px; font-weight: 200; letter-spacing: 8px; text-transform: uppercase; text-shadow: 0 2px 24px rgba(0,0,0,.9); }
   #locSub { font-size: 12px; letter-spacing: 4px; color: var(--dim); text-transform: uppercase; margin-top: 8px; }
+  #glass { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transition: opacity .6s; }
+  #glass.on { opacity: 1; }
   #flash { position: fixed; inset: 0; background: radial-gradient(ellipse at center, rgba(120,0,0,0) 40%, rgba(90,0,0,.55) 100%); opacity: 0; pointer-events: none; }
   #flash.on { animation: fl 1.4s ease-out forwards; }
   @keyframes fl { 0% { opacity: 1;} 100% { opacity: 0;} }
@@ -52,6 +54,7 @@
   <div id="env"><div><b id="alt">0 m</b> &nbsp;elev</div><div><b id="temp">-12.0°C</b> &nbsp;outside</div></div>
   <div id="hint">W / ↑ accelerate · S / ↓ brake · space handbrake · V camera · H lights · R recover</div>
 </div>
+<canvas id="glass"></canvas>
 <div id="flash"></div>
 <div id="title">
   <h1>Hollow Pass</h1>

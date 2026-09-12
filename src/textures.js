@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Simplex, mulberry32, clamp } from './noise.js';
+import { Simplex, mulberry32, clamp, smoothstep } from './noise.js';
 
 const sx = new Simplex(9001);
 
@@ -62,6 +62,11 @@ export function asphaltTextures() {
       const crackLine = crack < 0.025 ? 1 : 0;
       let base = 0.11 + grain * 0.06 + patch * 0.03;
       base = clamp(base, 0.03, 0.4);
+      // wheel tracks: two polished bands per lane (u across the road, 0..1), plus a snow/slush crust at the edges and the crown
+      const trackW = (t) => Math.exp(-Math.pow((u - t) / 0.035, 2));
+      const tracks = trackW(0.17) + trackW(0.33) + trackW(0.67) + trackW(0.83);
+      const slush = Math.max(0, sx.fbm(u * 3 + 70, v * 30 + 5, 3)) * (1 - Math.min(1, tracks * 1.4)) * (0.35 + 0.65 * Math.max(0, 1 - Math.abs(u - 0.5) * 5) + smoothstep(0.42, 0.5, Math.abs(u - 0.5)) * 1.2);
+      base = base * (1 - tracks * 0.25) + slush * 0.45;
       // salt / ice streaks
       const salt = Math.max(0, sx.fbm(u * 3 + 50, v * 40 + 3, 2)) ** 3;
       base += salt * 0.35;
@@ -71,10 +76,12 @@ export function asphaltTextures() {
       aimg.data[i] = g * 0.98; aimg.data[i + 1] = g * 1.0; aimg.data[i + 2] = g * 1.08; aimg.data[i + 3] = 255;
       // roughness: wet pools are glossy, salt is rough
       let r = 0.55 + grain * 0.15 - Math.max(0, wetPools) * 0.55 + salt * 0.4;
+      r -= tracks * 0.28;              // polished, icy in the wheel paths
+      r += slush * 0.5;                // crusty slush is rough
       if (crackLine) r = 0.85;
       r = clamp(r, 0.12, 0.95);
       rimg.data[i] = rimg.data[i + 1] = rimg.data[i + 2] = r * 255; rimg.data[i + 3] = 255;
-      hf[y * S + x] = 0.5 + grain * 0.5 - (crackLine ? 0.4 : 0) + Math.max(0, wetPools) * 0.05;
+      hf[y * S + x] = 0.5 + grain * 0.5 - (crackLine ? 0.4 : 0) + Math.max(0, wetPools) * 0.05 + slush * 0.6 - tracks * 0.1;
     }
   }
   actx.putImageData(aimg, 0, 0);
@@ -307,4 +314,104 @@ export function fogNoiseTexture() {
   }
   ctx.putImageData(img, 0, 0);
   return makeTex(c);
+}
+
+/** Spruce branch card: a drooping bough densely packed with dark needles, snow settled on top. RGBA. */
+export function branchTexture() {
+  const W = 256, H = 256;
+  const c = canvas(W, H);
+  const ctx = c.getContext('2d');
+  const rnd = mulberry32(2718);
+  ctx.clearRect(0, 0, W, H);
+  // bough runs from the bottom centre (trunk end) to the top centre (tip); side twigs fan out
+  const tip = 10;
+  ctx.strokeStyle = '#1d150f'; ctx.lineWidth = 4; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(W / 2, H); ctx.lineTo(W / 2, tip); ctx.stroke();
+  const twigs = 34;
+  for (let i = 0; i < twigs; i++) {
+    const t = i / twigs;
+    const y = H - 6 - t * (H - tip - 8);
+    const span = (1 - t * 0.85) * 110 + 8;
+    for (const side of [-1, 1]) {
+      const ex = W / 2 + side * span, ey = y + 18 + rnd() * 6; // twigs droop slightly
+      // dense needle fill along the twig: short strokes, dark blue-green
+      const n = 40 + Math.floor(rnd() * 20);
+      for (let k = 0; k < n; k++) {
+        const u = Math.pow(rnd(), 0.8);
+        const px = W / 2 + (ex - W / 2) * u, py = y + (ey - y) * u;
+        const shade = 0.6 + rnd() * 0.6;
+        ctx.strokeStyle = `rgb(${(12 * shade) | 0},${(30 * shade) | 0},${(20 * shade) | 0})`;
+        ctx.lineWidth = 1.2 + rnd() * 0.8;
+        const nl = 6 + rnd() * 8;
+        const ang = (rnd() - 0.5) * 1.2 + (rnd() > 0.5 ? 1.2 : -1.2);
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(ang) * nl * side, py + Math.sin(ang) * nl); ctx.stroke();
+      }
+      ctx.strokeStyle = '#241a12'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(W / 2, y); ctx.lineTo(ex, ey); ctx.stroke();
+    }
+  }
+  // snow: soft pale blobs sitting on the upper surface of the needles
+  for (let i = 0; i < 140; i++) {
+    const t = rnd();
+    const y = H - 10 - t * (H - tip - 14);
+    const span = (1 - t * 0.85) * 100 + 6;
+    const x = W / 2 + (rnd() * 2 - 1) * span;
+    const r = 3 + rnd() * 6;
+    const g = ctx.createRadialGradient(x, y + 6, 0, x, y + 6, r);
+    g.addColorStop(0, 'rgba(215,228,246,0.95)'); g.addColorStop(1, 'rgba(215,228,246,0)');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y + 6, r, 0, Math.PI * 2); ctx.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = 8;
+  return t;
+}
+
+/** Lake ice: pale blue-white with dark crack veins and trapped bubbles. */
+export function iceTextures() {
+  const S = 1024;
+  const hf = new Float32Array(S * S);
+  const alb = canvas(S, S), rough = canvas(S, S);
+  const actx = alb.getContext('2d'), rctx = rough.getContext('2d');
+  const aimg = actx.createImageData(S, S), rimg = rctx.createImageData(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = x / S, v = y / S;
+    const crackA = Math.abs(sx.noise2(u * 6 + 2, v * 6 + 2));
+    const crackB = Math.abs(sx.noise2(u * 14 + 9, v * 14 + 9));
+    const crack = (crackA < 0.03 ? 1 : 0) * 0.8 + (crackB < 0.02 ? 1 : 0) * 0.5;
+    const drift = Math.max(0, sx.fbm(u * 5, v * 5, 4)) * 0.9; // wind-blown snow on the ice
+    const base = 0.42 + sx.fbm(u * 20, v * 20, 3) * 0.06;
+    let r = base * 0.85, g = base * 0.95, b = base * 1.15;
+    r = lerp2(r, 0.86, drift); g = lerp2(g, 0.9, drift); b = lerp2(b, 0.96, drift);
+    r *= 1 - crack * 0.7; g *= 1 - crack * 0.7; b *= 1 - crack * 0.6;
+    const i = (y * S + x) * 4;
+    aimg.data[i] = r * 255; aimg.data[i + 1] = g * 255; aimg.data[i + 2] = b * 255; aimg.data[i + 3] = 255;
+    const ro = clamp(0.08 + drift * 0.7 + crack * 0.3, 0.05, 0.95);
+    rimg.data[i] = rimg.data[i + 1] = rimg.data[i + 2] = ro * 255; rimg.data[i + 3] = 255;
+    hf[y * S + x] = 0.5 - crack * 0.3 + drift * 0.2;
+  }
+  actx.putImageData(aimg, 0, 0); rctx.putImageData(rimg, 0, 0);
+  return { map: makeTex(alb, { srgb: true, aniso: 16 }), roughnessMap: makeTex(rough, { aniso: 16 }), normalMap: makeTex(normalFromHeight(hf, S, S, 1.2), { aniso: 16 }) };
+}
+function lerp2(a, b, t) { return a + (b - a) * t; }
+
+/** Frost / condensation overlay for the hood camera (RGBA). */
+export function frostTexture() {
+  const S = 512;
+  const c = canvas(S, S);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = x / S, v = y / S;
+    // frost creeps in from the edges and corners
+    const edge = Math.max(Math.abs(u - 0.5), Math.abs(v - 0.5)) * 2;
+    const fern = Math.abs(sx.fbm(u * 18, v * 18, 5, 2.4, 0.55));
+    const a = clamp(smoothstep(0.72, 1.05, edge + fern * 0.25) * (0.4 + fern), 0, 1);
+    const i = (y * S + x) * 4;
+    img.data[i] = 225; img.data[i + 1] = 235; img.data[i + 2] = 250; img.data[i + 3] = a * 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
 }

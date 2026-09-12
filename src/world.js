@@ -2,7 +2,9 @@ import * as THREE from 'three';
 import { Road, buildRoadMesh, ROAD_WIDTH } from './road.js';
 import { Terrain, baseHeight, terrainMaterial, WORLD_HALF } from './terrain.js';
 import * as T from './textures.js';
-import { spruceGeometry, deadTreeGeometry, boulderGeometry, merge, signMesh, deerMesh, figureMesh } from './props.js';
+import { spruceCardGeometry, spruceGeometry, deadTreeGeometry, boulderGeometry, merge, signMesh, deerMesh, figureMesh } from './props.js';
+import { ObstacleField } from './collision.js';
+import { Traffic } from './traffic.js';
 import { buildBridge, buildTunnel, buildGasStation, buildCemetery, buildOverlook, buildTower, placeAlong } from './setpieces.js';
 import { buildSky, MOON_DIR } from './sky.js';
 import { Simplex, mulberry32, clamp, smoothstep, lerp } from './noise.js';
@@ -15,6 +17,7 @@ export class World {
     this.renderer = renderer;
     this.fixtures = [];
     this.pooled = [];
+    this.obstacles = new ObstacleField(24);
     this.time = 0;
     this.sections = [];
   }
@@ -58,6 +61,8 @@ export class World {
       if (!n) return null;
       if (n.sample.bridge) return { limit: ROAD_WIDTH / 2 + 1.0, n };
       if (n.sample.tunnel) return { limit: ROAD_WIDTH / 2 + 1.2, n };
+      const side = n.lateral > 0 ? 'railL' : 'railR';
+      if (n.sample[side]) return { limit: ROAD_WIDTH / 2 + 1.35, n, oneSided: n.lateral > 0 ? 1 : -1 };
       return null;
     };
 
@@ -67,6 +72,7 @@ export class World {
       asphalt: T.asphaltTextures(), snow: T.snowTextures(), rock: T.rockTextures(), tyre: T.tyreTextures(),
       concrete: T.concreteTextures(), bark: T.barkTextures(), stars: T.starTexture(), fogNoise: T.fogNoiseTexture(),
       plate: T.signTexture(['HLW 4471'], { bg: '#e8e6dc', fg: '#1a1a1a', w: 256, h: 72, border: true }),
+      branch: T.branchTexture(), ice: T.iceTextures(), frost: T.frostTexture(),
     };
     this.tex = tex;
 
@@ -102,6 +108,7 @@ export class World {
       bark: new THREE.MeshStandardMaterial({ map: tex.bark.map, normalMap: tex.bark.normalMap, roughness: 0.95, color: 0x6a5a4c }),
       deadWood: new THREE.MeshStandardMaterial({ map: tex.bark.map, normalMap: tex.bark.normalMap, roughness: 1, color: 0x2a2523 }),
       foliage: new THREE.MeshStandardMaterial({ color: 0x0e2016, roughness: 0.95 }),
+      branch: new THREE.MeshStandardMaterial({ map: tex.branch, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.95, color: 0xdde4ec, shadowSide: THREE.DoubleSide }),
       snowCap: new THREE.MeshStandardMaterial({ map: tex.snow.map, color: 0xb4c0d4, roughness: 0.85 }),
       asphaltOld: new THREE.MeshStandardMaterial({ map: tex.asphalt.map, normalMap: tex.asphalt.normalMap, roughness: 0.95, color: 0x8a8d90 }),
       panelRust: new THREE.MeshStandardMaterial({ map: tex.concrete.map, color: 0x6b4a3a, roughness: 0.8, metalness: 0.4 }),
@@ -116,6 +123,8 @@ export class World {
     progress('Planning the route…', 0.1);
     await tick();
     this._plan();
+
+    this._biomes();
 
     progress('Raising the terrain…', 0.14);
     await tick();
@@ -139,6 +148,11 @@ export class World {
     progress('Building set pieces…', 0.78);
     await tick();
     this._setPieces();
+
+    progress('Frozen lake…', 0.86);
+    await tick();
+    this._lake();
+    this.traffic = new Traffic(this, this.scene, this.envMap);
 
     progress('Moonrise…', 0.9);
     await tick();
@@ -216,6 +230,91 @@ export class World {
     ].filter(Boolean).map((sec) => ({ ...sec, s: ((sec.s % L) + L) % L }));
   }
 
+
+  /** Label free stretches of the loop so the scenery keeps changing: forest, canyon, alpine, lake, open. */
+  _biomes() {
+    const road = this.road, terrain = this.terrain, N = road.count;
+    const feat = terrain.features;
+    const busy = new Uint8Array(N);
+    const mark = (i, span) => { for (let k = -span; k <= span; k++) busy[((i + k) % N + N) % N] = 1; };
+    if (feat.bridge) mark(feat.bridge.mid, 110);
+    if (feat.tunnel) mark(feat.tunnel.mid, 100);
+    mark(this.overlookI, 70); mark(this.gasI, 90); mark(this.cemeteryI, 90); mark(this.deadI, 110);
+    for (let i = 0; i < N; i++) road.samples[i].biome = 'open';
+    // free runs
+    const runs = [];
+    let start = -1;
+    for (let i = 0; i < N * 2; i++) {
+      const free = !busy[i % N];
+      if (free && start < 0) start = i;
+      if (!free && start >= 0) { if (start < N) runs.push([start, i]); start = -1; }
+    }
+    runs.sort((a, b) => (b[1] - b[0]) - (a[1] - a[0]));
+    const meanY = ([a, b]) => { let acc = 0; for (let i = a; i < b; i++) acc += road.samples[i % N].y; return acc / (b - a); };
+    const label = (a, b, name) => { for (let i = a; i < b; i++) road.samples[i % N].biome = name; };
+    const used = new Set();
+    // longest run: forest then canyon (each at least 400 m)
+    if (runs[0]) { const [a, b] = runs[0]; const m = Math.floor((a + b) / 2); label(a + 10, m - 10, 'forest'); label(m + 10, b - 10, 'canyon'); used.add(runs[0]); }
+    const rest = runs.filter((r) => !used.has(r) && r[1] - r[0] > 60);
+    if (rest.length) { rest.sort((p, q) => meanY(q) - meanY(p)); const [a, b] = rest[0]; label(a + 8, b - 8, 'alpine'); used.add(rest[0]); }
+    const rest2 = runs.filter((r) => !used.has(r) && r[1] - r[0] > 60);
+    if (rest2.length) { rest2.sort((p, q) => meanY(p) - meanY(q)); const [a, b] = rest2[0]; label(a + 8, b - 8, 'lake'); used.add(rest2[0]); this.lakeRun = [a, b]; }
+    const rest3 = runs.filter((r) => !used.has(r) && r[1] - r[0] > 60);
+    if (rest3.length) { const [a, b] = rest3[0]; label(a + 8, b - 8, 'forest'); }
+    // lake geometry: a basin on the flatter side of the lake run
+    if (this.lakeRun) {
+      const [a, b] = this.lakeRun; const mi = Math.floor((a + b) / 2) % N; const sm = road.samples[mi];
+      const l = baseHeight(sm.x + sm.nx * 120, sm.z + sm.nz * 120), r = baseHeight(sm.x - sm.nx * 120, sm.z - sm.nz * 120);
+      const side = l < r ? 1 : -1;
+      const rad = Math.min(220, (b - a) * 4 * 0.45);
+      const cx = sm.x + sm.nx * side * (rad + 6), cz = sm.z + sm.nz * side * (rad + 6);
+      this.lake = { x: cx, z: cz, r: rad, y: sm.y - 1.2, side, i: mi };
+      terrain.lakes = [this.lake];
+      this.lakeSide = side;
+    }
+    // section labels for the HUD
+    const sOf = (i) => road.samples[i % N].s;
+    const add = (name, a, sub, kind) => this.sections.push({ name, s: sOf(a), span: 260, sub, kind });
+    let last = null;
+    for (let i = 0; i < N; i++) {
+      const bm = road.samples[i].biome;
+      if (bm !== last) {
+        if (bm === 'forest') add('Blackwood', i, 'old growth · watch for moose', 'forest');
+        if (bm === 'canyon') add("Devil's Throat", i, 'rockfall zone · no stopping', 'canyon');
+        if (bm === 'alpine') add('Ptarmigan Flats', i, 'exposed · high wind', 'alpine');
+        if (bm === 'lake') add('Lake Nowhere', i, 'thin ice', 'lake');
+        last = bm;
+      }
+    }
+  }
+
+  _lake() {
+    if (!this.lake) return;
+    const lk = this.lake;
+    const geo = new THREE.CircleGeometry(lk.r + 30, 96);
+    geo.rotateX(-Math.PI / 2);
+    const uv = geo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, uv.getX(i) * 6, uv.getY(i) * 6);
+    const mat = new THREE.MeshPhysicalMaterial({
+      map: this.tex.ice.map, roughnessMap: this.tex.ice.roughnessMap, normalMap: this.tex.ice.normalMap, normalScale: new THREE.Vector2(0.5, 0.5),
+      roughness: 1, metalness: 0.0, clearcoat: 1.0, clearcoatRoughness: 0.15, envMap: this.envMap, envMapIntensity: 1.8, color: 0xbfd0e8,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.position.set(lk.x, lk.y, lk.z);
+    m.receiveShadow = true;
+    this.scene.add(m);
+    // an ice-fishing hut with one lit window, far out on the ice
+    const hut = new THREE.Group();
+    hut.position.set(lk.x + lk.r * 0.35, lk.y, lk.z - lk.r * 0.2);
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(2.4, 2.2, 2.8), this.mats.woodOld); walls.position.y = 1.1; walls.castShadow = true; hut.add(walls);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(2.8, 0.2, 3.2), this.mats.panelRust); roof.position.y = 2.3; hut.add(roof);
+    const win = new THREE.Mesh(new THREE.PlaneGeometry(0.6, 0.5), new THREE.MeshStandardMaterial({ color: 0x201000, emissive: 0xffb050, emissiveIntensity: 3 }));
+    win.position.set(0, 1.3, 1.41); hut.add(win);
+    this.scene.add(hut);
+    this.fixtures.push({ pos: new THREE.Vector3(hut.position.x, lk.y + 1.3, hut.position.z + 1.5), color: new THREE.Color(0xffb050), intensity: 30, range: 14, flicker: 'candle', bulb: win });
+    this.obstacles.add(hut.position.x, hut.position.z, 1.9, 'building');
+    this.hut = hut;
+  }
+
   _farMountains() {
     const size = 12000, n = 120, sp = size / n;
     const pos = [], idx = [];
@@ -253,6 +352,7 @@ export class World {
         const dropX = s.x + s.nx * side * 12, dropZ = s.z + s.nz * side * 12;
         const drop = s.y - terrain.heightAt(dropX, dropZ);
         if (drop < 2.5) continue; // only where there's a fall
+        s[side > 0 ? 'railL' : 'railR'] = true;
         const x0 = s.x + s.nx * side * hw, z0 = s.z + s.nz * side * hw;
         const x1 = s1.x + s1.nx * side * hw, z1 = s1.z + s1.nz * side * hw;
         const len = Math.hypot(x1 - x0, z1 - z0) + 0.05;
@@ -270,6 +370,7 @@ export class World {
           const y = terrain.heightAt(x0, z0);
           const p = new THREE.BoxGeometry(0.1, 1.2, 0.1); p.translate(x0, y + 0.6, z0); posts.push(p);
           const r = new THREE.BoxGeometry(0.11, 0.12, 0.11); r.translate(x0, y + 1.05, z0); refl.push(r);
+          this.obstacles.add(x0, z0, 0.12, 'post');
         }
       }
     }
@@ -284,68 +385,102 @@ export class World {
   _forest() {
     const road = this.road, terrain = this.terrain, mats = this.mats, N = road.count;
     const rnd = mulberry32(99);
-    const spruce = spruceGeometry();
-    const MAXT = 32000;
-    const trunkIM = new THREE.InstancedMesh(spruce.trunk, mats.bark, MAXT);
-    const folIM = new THREE.InstancedMesh(spruce.foliage, mats.foliage, MAXT);
-    const snowIM = new THREE.InstancedMesh(spruce.snow, mats.snowCap, MAXT);
+    const spruce = spruceCardGeometry();
+    const cone = spruceGeometry();
     const deadGeos = [deadTreeGeometry(1), deadTreeGeometry(2), deadTreeGeometry(3)];
-    const deadIMs = deadGeos.map((g) => new THREE.InstancedMesh(g, mats.deadWood, 1200));
     const rockGeos = [boulderGeometry(1), boulderGeometry(5), boulderGeometry(9)];
-    const rockIMs = rockGeos.map((g) => new THREE.InstancedMesh(g, mats.rock, 900));
+    // matrices are collected per spatial cell, then each cell becomes its own InstancedMesh so it can be frustum-culled
+    const CELL = 300;
+    const cells = new Map();
+    const bucket = (kind, x, z, mtx) => {
+      const key = kind + ':' + Math.floor(x / CELL) + ':' + Math.floor(z / CELL);
+      if (!cells.has(key)) cells.set(key, { kind, list: [], cx: (Math.floor(x / CELL) + 0.5) * CELL, cz: (Math.floor(z / CELL) + 0.5) * CELL });
+      cells.get(key).list.push(mtx.clone());
+    };
     const m = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3();
-    let ti = 0; const di = [0, 0, 0], ri = [0, 0, 0];
+    let ti = 0, deadCount = 0, rockCount = 0;
     const deadS = road.samples[this.deadI].s, L = road.length;
     const inDead = (s) => { let d = Math.abs(s - deadS); d = Math.min(d, L - d); return d < 380; };
     const treeline = 760;
-    // dense band along the road + sparse fill elsewhere
+    const lake = this.lake;
+    const rock = (x, z, size) => {
+      const y = terrain.heightAt(x, z);
+      q.setFromEuler(new THREE.Euler(rnd() * 0.6, rnd() * 6.28, rnd() * 0.6)); p.set(x, y - size * 0.35, z); sc.set(size, size, size); m.compose(p, q, sc);
+      bucket('rock' + Math.floor(rnd() * 3), x, z, m); rockCount++;
+      this.obstacles.add(x, z, size * 1.0, 'rock');
+    };
     const tryTree = (x, z) => {
       if (Math.abs(x) > WORLD_HALF - 40 || Math.abs(z) > WORLD_HALF - 40) return;
-      const n = road.nearest(x, z, 60);
-      if (n && n.d < 8.5) return;
+      const n = road.nearest(x, z, 80);
+      const biome = n ? n.sample.biome : 'open';
+      const minD = biome === 'forest' ? 6.6 : 9.0;
+      if (n && n.d < minD) return;
+      if (n && n.d < 70 && (biome === 'canyon' || n.sample.tunnel)) {
+        if (rnd() < 0.25 && n.d > 5.2 && n.d < 9) rock(x, z, 0.5 + rnd() * 1.2);
+        return;
+      }
+      if (lake && Math.hypot(x - lake.x, z - lake.z) < lake.r + 8) return;
       for (const pad of terrain.pads) if (Math.hypot(x - pad.x, z - pad.z) < pad.r + 6) return;
       const y = terrain.heightAt(x, z);
       const slope = terrain.slopeAt(x, z);
-      if (slope > 0.95) { // steep: maybe a boulder
-        if (rnd() < 0.15 && n && n.d < 60) { const k = Math.floor(rnd() * 3); if (ri[k] < 900) { const s = 0.8 + rnd() * 2.4; q.setFromEuler(new THREE.Euler(rnd() * 0.6, rnd() * 6.28, rnd() * 0.6)); p.set(x, y - s * 0.35, z); sc.set(s, s, s); m.compose(p, q, sc); rockIMs[k].setMatrixAt(ri[k]++, m); } }
-        return;
-      }
-      const density = smoothstep(treeline, treeline - 140, y) * (0.55 + sx.fbm(x / 160, z / 160, 3) * 0.6);
+      if (slope > 0.95) { if (rnd() < 0.15 && n && n.d < 60) rock(x, z, 0.8 + rnd() * 2.4); return; }
+      const alpine = biome === 'alpine' && n && n.d < 240;
+      const tl = alpine ? y - 1 : treeline;
+      let density = smoothstep(tl, tl - 140, y) * (0.55 + sx.fbm(x / 160, z / 160, 3) * 0.6);
+      if (biome === 'forest' && n && n.d < 120) density = 1.0;
+      if (alpine && rnd() < 0.35 && n.d > 10 && n.d < 90) { rock(x, z, 0.4 + rnd() * 1.0); return; }
       if (rnd() > density) return;
       const near = n ? n.s : -1;
       if (n && n.d < 420 && inDead(near)) {
-        const k = Math.floor(rnd() * 3);
-        if (di[k] >= 1200) return;
-        const s = 0.7 + rnd() * 0.8;
+        const sz = 0.7 + rnd() * 0.8;
         q.setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.12, rnd() * 6.28, (rnd() - 0.5) * 0.12));
-        p.set(x, y - 0.2, z); sc.set(s, s, s); m.compose(p, q, sc);
-        deadIMs[k].setMatrixAt(di[k]++, m);
+        p.set(x, y - 0.2, z); sc.set(sz, sz, sz); m.compose(p, q, sc);
+        bucket('dead' + Math.floor(rnd() * 3), x, z, m); deadCount++;
+        this.obstacles.add(x, z, 0.3 * sz + 0.1, 'tree');
         return;
       }
-      if (ti >= MAXT) return;
-      const s = 0.75 + rnd() * 0.9;
-      q.setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.08, rnd() * 6.28, (rnd() - 0.5) * 0.08));
-      p.set(x, y - 0.3, z); sc.set(s * (0.9 + rnd() * 0.3), s, s * (0.9 + rnd() * 0.3)); m.compose(p, q, sc);
-      trunkIM.setMatrixAt(ti, m); folIM.setMatrixAt(ti, m); snowIM.setMatrixAt(ti, m); ti++;
+      const sz = (biome === 'forest' ? 1.0 : 0.75) + rnd() * 0.9;
+      q.setFromEuler(new THREE.Euler((rnd() - 0.5) * 0.06, rnd() * 6.28, (rnd() - 0.5) * 0.06));
+      p.set(x, y - 0.3, z); sc.set(sz * (0.9 + rnd() * 0.3), sz, sz * (0.9 + rnd() * 0.3)); m.compose(p, q, sc);
+      // detailed card trees within 260 m of the road, cheap cone trees beyond
+      bucket(n && n.d < 260 ? 'tree' : 'far', x, z, m); ti++;
+      this.obstacles.add(x, z, 0.28 * sz + 0.12, 'tree');
     };
-    // band along the road
     for (let i = 0; i < N; i += 1) {
       const s = road.samples[i];
-      for (let k = 0; k < 7; k++) {
+      const dense = s.biome === 'forest';
+      for (let k = 0; k < (dense ? 14 : 7); k++) {
         const side = rnd() > 0.5 ? 1 : -1;
-        const d = 10 + Math.pow(rnd(), 1.6) * 260;
+        const d = (dense ? 6 : 10) + Math.pow(rnd(), dense ? 2.2 : 1.6) * (dense ? 140 : 260);
         const along = (rnd() - 0.5) * 4;
         tryTree(s.x + s.nx * side * d + s.tx * along, s.z + s.nz * side * d + s.tz * along);
       }
     }
-    // fill
     for (let k = 0; k < 26000; k++) tryTree((rnd() - 0.5) * 2 * (WORLD_HALF - 50), (rnd() - 0.5) * 2 * (WORLD_HALF - 50));
-    trunkIM.count = folIM.count = snowIM.count = ti;
-    for (const im of [trunkIM, folIM, snowIM]) { im.castShadow = im !== snowIM; im.receiveShadow = true; im.instanceMatrix.needsUpdate = true; this.scene.add(im); }
-    deadIMs.forEach((im, k) => { im.count = di[k]; im.castShadow = true; im.instanceMatrix.needsUpdate = true; this.scene.add(im); });
-    rockIMs.forEach((im, k) => { im.count = ri[k]; im.castShadow = true; im.receiveShadow = true; im.instanceMatrix.needsUpdate = true; this.scene.add(im); });
-    this.treeCount = ti;
-    // eyes in the dark: pairs of tiny emissive points among the trees, only visible when the car is far
+    // build one InstancedMesh per cell and kind
+    const make = (geo, mat, list, shadow = true) => {
+      const im = new THREE.InstancedMesh(geo, mat, list.length);
+      list.forEach((mm, i) => im.setMatrixAt(i, mm));
+      im.instanceMatrix.needsUpdate = true;
+      im.castShadow = shadow; im.receiveShadow = true;
+      im.computeBoundingSphere();
+      this.scene.add(im);
+      return im;
+    };
+    for (const cell of cells.values()) {
+      const k = cell.kind;
+      if (k === 'tree') {
+        make(spruce.trunk, mats.bark, cell.list);
+        make(spruce.cards, mats.branch, cell.list, false);
+        // shadow proxy: cheap cone silhouette on the shadow-only layer (2); the cameras never draw it
+        const proxy = make(cone.foliage, mats.foliage, cell.list, true);
+        proxy.layers.set(2);
+      }
+      else if (k === 'far') { make(cone.trunk, mats.bark, cell.list, false); make(cone.foliage, mats.foliage, cell.list, false); make(cone.snow, mats.snowCap, cell.list, false); }
+      else if (k.startsWith('dead')) make(deadGeos[+k[4]], mats.deadWood, cell.list);
+      else if (k.startsWith('rock')) make(rockGeos[+k[4]], mats.rock, cell.list);
+    }
+    this.treeCount = ti; this.deadCount = deadCount; this.rockCount = rockCount; this.forestCells = cells.size;
     this._eyes();
   }
 
@@ -380,6 +515,8 @@ export class World {
     this.cemetery = add(buildCemetery(road, terrain, mats, road.samples[this.cemeteryI].s, this.cemeterySide));
     this.overlook = add(buildOverlook(road, terrain, mats, road.samples[this.overlookI].s, this.overlookSide, road.samples[this.overlookI].y));
     if (this.towerXZ) this.tower = add(buildTower(terrain, mats, this.towerXZ[0], this.towerXZ[1]));
+    for (const r of [this.bridge, this.tunnel, this.gas, this.cemetery, this.overlook, this.tower]) if (r && r.obstacles) for (const o of r.obstacles) this.obstacles.add(o.x, o.z, o.r, o.kind || 'building');
+    if (this.towerXZ) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; this.obstacles.add(this.towerXZ[0] + Math.cos(a) * 2.2, this.towerXZ[1] + Math.sin(a) * 2.2, 0.3, 'building'); }
     // warning signs ahead of each section
     const signs = [
       [this.sections.find((s) => s.kind === 'bridge'), ['ICE ON', 'BRIDGE'], '#e8b800', '#111'],
@@ -395,6 +532,7 @@ export class World {
       const sign = signMesh(tex, 1.3, 1.3, 2.0, mats);
       placeAlong(sign, road, sec.s - 80, -6.2, terrainDrop(terrain, road, sec.s - 80, -6.2), Math.PI);
       this.scene.add(sign);
+      this.obstacles.add(sign.position.x, sign.position.z, 0.25, 'sign');
     }
     // the figure in the burn and the deer
     this.figure2 = figureMesh(); this.figure2.visible = false; this.scene.add(this.figure2);
@@ -407,17 +545,18 @@ export class World {
     const moon = new THREE.DirectionalLight(0xaabce8, 1.35);
     moon.position.copy(MOON_DIR).multiplyScalar(400);
     moon.castShadow = true;
-    moon.shadow.mapSize.set(2048, 2048);
+    moon.shadow.mapSize.set(1536, 1536);
     const sc = moon.shadow.camera;
     sc.left = -90; sc.right = 90; sc.top = 90; sc.bottom = -90; sc.near = 50; sc.far = 900;
     moon.shadow.bias = -0.0015; moon.shadow.normalBias = 0.6;
+    moon.shadow.camera.layers.enable(2);
     scene.add(moon); scene.add(moon.target);
     this.moon = moon;
     const hemi = new THREE.HemisphereLight(0x2c3b5c, 0x0b0d12, 0.75);
     scene.add(hemi);
     this.hemi = hemi;
     // pooled point lights for fixtures
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 3; i++) {
       const l = new THREE.PointLight(0xffffff, 0, 10, 2);
       l.castShadow = false;
       scene.add(l);

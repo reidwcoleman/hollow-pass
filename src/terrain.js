@@ -14,7 +14,8 @@ export function baseHeight(x, z) {
   const big = sx.ridged(x / 1500 + 3.1, z / 1500 + 1.7, 5, 2.05, 0.5);        // ridges
   const massif = Math.exp(-Math.pow(r / 900, 2)) * 420;                        // central peak the loop circles
   const roll = sx.fbm(x / 420 + 8, z / 420 + 8, 4, 2, 0.5) * 60;
-    const fine = sx2.fbm(x / 60, z / 60, 3, 2.2, 0.5) * 6 + sx2.fbm(x / 14, z / 14, 2) * 1.2;
+  const fine = sx2.fbm(x / 60, z / 60, 3, 2.2, 0.5) * 6 + sx2.fbm(x / 14, z / 14, 2) * 1.2
+    + Math.sin((x * 0.9 + z * 0.35) * 0.8 + sx2.noise2(x / 9, z / 9) * 3) * 0.12; // wind ripples in the snow
   const rim = smoothstep(1650, 2300, r) * 520 * (0.6 + sx.fbm(x / 500, z / 500, 2) * 0.4); // outer wall of peaks
   return 20 + big * 480 + massif + roll + fine + rim;
 }
@@ -68,6 +69,14 @@ export class Terrain {
   heightAt(x, z) {
     const road = this.road;
     let h = baseHeight(x, z);
+    // lakes: flat bed a little under the ice
+    if (this.lakes) for (const lk of this.lakes) {
+      const dl = Math.hypot(x - lk.x, z - lk.z);
+      if (dl < lk.r + 60) {
+        const w = 1 - smoothstep(lk.r, lk.r + 60, dl);
+        h = lerp(h, Math.min(h, lk.y - 1.6), w);
+      }
+    }
     const n = road.nearest(x, z, 70);
     if (!n) return h;
     const s = n.sample;
@@ -86,6 +95,12 @@ export class Terrain {
     if (s.tunnel) {
       // no cut inside the mountain; make sure the rock is well above the tube
       return Math.max(h, n.y + 14 + smoothstep(0, 40, d) * 10);
+    }
+    if (s.biome === 'canyon' && d > half + 1.5 && !s.bridge && !s.tunnel) {
+      const wall = smoothstep(half + 1.5, half + 18, d) * (38 + sx2.fbm(x / 30, z / 30, 3) * 14);
+      const cliff = Math.max(h, n.y + wall);
+      const fall = smoothstep(half + 1.5, half + 60, d);
+      return lerp(n.y - 0.25 + smoothstep(half, half + 1.5, d) * 0, cliff, Math.min(1, fall * 3)) + (d > half + 60 ? 0 : 0);
     }
     if (s.portal) {
       // wide, steep-walled cutting leading into the portal
@@ -233,6 +248,20 @@ export function terrainMaterial(snow, rock) {
         float rk = smoothstep(0.25, 0.75, vRock + (rockCol.r - 0.3) * 0.35);
         vec4 sampledDiffuseColor = mix(snowCol, rockCol, rk);
         diffuseColor *= sampledDiffuseColor;
+      `)
+      .replace('#include <emissivemap_fragment>', `
+        #include <emissivemap_fragment>
+        // snow sparkle: tiny glints where the view and moon directions align on a hashed facet
+        {
+          vec3 vDir = normalize(cameraPosition - vWPos);
+          vec3 h = normalize(vDir + normalize(vec3(-0.45, 0.42, -0.79)));
+          vec2 cell = floor(vWPos.xz * 6.0);
+          float hsh = fract(sin(dot(cell, vec2(127.1, 311.7))) * 43758.5453);
+          vec3 fn = normalize(normal + (vec3(fract(hsh * 7.0), fract(hsh * 13.0), fract(hsh * 3.0)) - 0.5) * 0.9);
+          float sp = pow(max(dot(fn, h), 0.0), 60.0);
+          float far = 1.0 - smoothstep(20.0, 90.0, length(cameraPosition - vWPos));
+          totalEmissiveRadiance += vec3(0.75, 0.85, 1.0) * sp * step(0.93, hsh) * 0.9 * (1.0 - smoothstep(0.25, 0.75, vRock)) * far;
+        }
       `)
       .replace('#include <roughnessmap_fragment>', `
         float roughnessFactor = roughness;
