@@ -48,21 +48,26 @@ export class Terrain {
     };
     const bridges = runs((d) => d > 9, 25);
     const tunnels = runs((d) => d < -14, 30);
-    if (bridges.length) {
-      let [a, b] = bridges[0];
-      // trim to the deepest core: make the deck span at least 30 samples (120m)
-      this.features.bridge = { a, b, mid: (a + b) / 2 };
+    const overlaps = (a, b, list, margin = 60) => list.some((f) => Math.abs(((a + b) / 2) - f.mid) < (b - a) / 2 + (f.b - f.a) / 2 + margin);
+    this.features.bridges = []; this.features.tunnels = [];
+    for (const [a, b] of bridges) {
+      if (this.features.bridges.length >= 2) break;
+      if (overlaps(a, b, this.features.bridges, 200)) continue;
+      const f = { a, b, mid: (a + b) / 2, index: this.features.bridges.length };
+      this.features.bridges.push(f);
       for (let i = a; i < b; i++) road.samples[i % N].bridge = true;
     }
-    if (tunnels.length) {
-      // choose a tunnel that isn't the bridge
-      const t = tunnels.find(([a, b]) => !this.features.bridge || Math.abs(a - this.features.bridge.a) > 200) || tunnels[0];
-      let [a, b] = t;
+    for (let [a, b] of tunnels) {
+      if (this.features.tunnels.length >= 2) break;
+      if (overlaps(a, b, this.features.bridges, 120) || overlaps(a, b, this.features.tunnels, 300)) continue;
       if (b - a > 110) { const m = (a + b) / 2; a = Math.floor(m - 55); b = Math.floor(m + 55); }
-      this.features.tunnel = { a, b, mid: (a + b) / 2 };
+      const f = { a, b, mid: (a + b) / 2, index: this.features.tunnels.length };
+      this.features.tunnels.push(f);
       for (let i = a; i < b; i++) road.samples[i % N].tunnel = true;
       for (let k = 1; k <= 12; k++) { road.samples[((a - k) % N + N) % N].portal = true; road.samples[(b + k - 1) % N].portal = true; }
     }
+    this.features.bridge = this.features.bridges[0] || null;
+    this.features.tunnel = this.features.tunnels[0] || null;
   }
 
   /** Final terrain height at world (x,z). */
@@ -84,13 +89,13 @@ export class Terrain {
     const d = n.d;
     if (s.bridge) {
       // gorge under the deck: carve a deep V around the bridge line, ignore the road cut
-      const b = this.features.bridge;
-      const idx = n.i;
-      const N = road.count;
-      const inCore = (idx - b.a + N) % N < (b.b - b.a);
-      const along = inCore ? 1 : 0;
-      const w = smoothstep(190, 40, d) * along;
+      const w = smoothstep(190, 40, d);
       return h - w * 140 - (d < 12 ? 6 : 0);
+    }
+    if (s.biome === 'ridge' && !s.bridge && !s.tunnel && d > half + 1.5) {
+      // knife-edge causeway: the ground falls away steeply on both sides
+      const drop = smoothstep(half + 1.5, half + 45, d) * 70 + smoothstep(half + 45, half + 160, d) * 90;
+      return Math.min(lerp(n.y - 0.25, h, smoothstep(half + 1.5, half + 6, d)), n.y - drop) + (d < half + 6 ? 0 : 0);
     }
     if (s.tunnel) {
       // no cut inside the mountain; make sure the rock is well above the tube
@@ -261,6 +266,9 @@ export function terrainMaterial(snow, rock) {
           float sp = pow(max(dot(fn, h), 0.0), 60.0);
           float far = 1.0 - smoothstep(20.0, 90.0, length(cameraPosition - vWPos));
           totalEmissiveRadiance += vec3(0.75, 0.85, 1.0) * sp * step(0.93, hsh) * 0.9 * (1.0 - smoothstep(0.25, 0.75, vRock)) * far;
+          // soft blue rim where snow is seen at a grazing angle against the moon (cheap subsurface-ish scatter)
+          float rim = pow(1.0 - max(dot(normalize(normal), vDir), 0.0), 3.0);
+          totalEmissiveRadiance += vec3(0.16, 0.22, 0.34) * rim * 0.25 * (1.0 - smoothstep(0.25, 0.75, vRock));
         }
       `)
       .replace('#include <roughnessmap_fragment>', `

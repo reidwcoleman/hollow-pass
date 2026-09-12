@@ -1,6 +1,6 @@
 # Hollow Pass
 
-A night drive over a cold mountain pass. County Route 9: a 9.9 km loop of dark, icy road through old-growth forest, a rock canyon, a frozen lake, exposed alpine flats and a burnt forest, with a gorge bridge, a tunnel with dying sodium lights, an abandoned gas station, a cemetery and a summit overlook under the aurora. Other traffic works the road at night: oncoming cars, slow pickups to overtake, a snowplough. Things stand by the road. They are not there when you get close. Some of them follow.
+A night drive over a cold mountain pass. County Route 9: a 9.9 km loop of dark, icy road through old-growth forest, a rock canyon with an abandoned mine, a frozen lake with a black-ice stretch, exposed alpine flats with an avalanche zone and an abandoned convoy, a knife-edge ridge, a dead village, a burnt forest, two gorge bridges, two tunnels, a gas station, a cemetery and a summit overlook under the aurora. Other traffic works the road at night: oncoming cars, slow pickups to overtake, a snowplough. Things stand by the road. They are not there when you get close. Some of them follow.
 
 Play it: https://reidwcoleman.github.io/hollow-pass/
 
@@ -34,11 +34,11 @@ Touch: left/right half of the screen steers, top 70% accelerates, bottom brakes.
 - `src/terrain.js` – ridged-noise mountains, the road cut with a plough bank, chunked meshes (2.5 m spacing near the road) with skirts; snow/rock PBR blend in a patched `MeshStandardMaterial`.
 - `src/world.js` – plans the loop (bridge and tunnel are detected from road/terrain mismatch), instanced forest, guardrails, pooled point lights for fixtures, snowfall lit by the headlights, valley cloud decks.
 - `src/setpieces.js` – Widow's Bridge, Mercy Tunnel, Last Chance Gas, Hallow Chapel, the overlook, the radio mast.
-- `src/car.js` – the 4x4 (lofted body, clear-coat paint, glass, real spotlights with shadow maps, volumetric beams, per-wheel suspension) and its physics.
+- `src/car.js` – the 4x4 (lofted body, clear-coat paint, glass, real spotlights with shadow maps, volumetric beams, per-wheel suspension) and its physics: torque curve, 6-speed automatic with kick-down, traction-limited launch on snow, aero/rolling drag, engine braking, ABS, bicycle-model yaw with understeer, and a corner assist that eases off and brakes for bends it can see coming.
 - `src/collision.js` – obstacle field: every tree, rock, post, sign, building and vehicle is solid; the car is pushed out and loses speed.
 - `src/traffic.js` – oncoming and same-direction vehicles with headlight glare, the plough, ghosts and the follower.
 - `src/particles.js` – snow spray from the wheels, exhaust vapour.
-- `src/events.js` – sections, scares (tunnel figure, bridge jumper, engine stall, the tall one in the canyon, whiteout, the lantern on the ice, the follower, vanishing oncoming cars, handprints, the radio voice), mood (fog, aurora, dread, heartbeat, static).
+- `src/events.js` / `src/scares2.js` – sections, scares (tunnel figure, bridge jumper, engine stall, the tall one, whiteout, the lantern on the ice, the follower and the ram, vanishing oncoming cars, the wrong-way driver, the tunnel blackout and the ones on the walkways, the snowman that gets closer, the blink, the sitter on the fallen tree, the blood moon, the phone box, 03:33, the runner, the breathing when you stop, the numbers station, the ore cart, the avalanche, the convoy, cracking ice, handprints, the radio voice), mood (fog, aurora, dread, heartbeat, static).
 - `src/audio.js` – synthesized engine, wind, tyres, drone, bell, stings.
 - `src/postfx.js` – HDR bloom, grade, vignette, grain, chromatic aberration, SMAA.
 

@@ -53,6 +53,11 @@ export class GameAudio {
     const whine = C.createOscillator(); whine.type = 'sine'; whine.frequency.value = 2200; const wg2 = this.whine = C.createGain(); wg2.gain.value = 0; whine.connect(wg2); wg2.connect(master); whine.start();
     // radio static bed
     const st = this._noise(); const sf = C.createBiquadFilter(); sf.type = 'highpass'; sf.frequency.value = 1500; const sg = this.staticGain = C.createGain(); sg.gain.value = 0; st.connect(sf); sf.connect(sg); sg.connect(master);
+    // breathing: band-passed noise swelling on a slow LFO
+    const br = this._noise(); const bf = C.createBiquadFilter(); bf.type = 'bandpass'; bf.frequency.value = 600; bf.Q.value = 0.6;
+    const bg = this.breathGain = C.createGain(); bg.gain.value = 0;
+    const blfo = C.createOscillator(); blfo.frequency.value = 0.28; const blg = this.breathLfo = C.createGain(); blg.gain.value = 0; blfo.connect(blg); blg.connect(bg.gain); blfo.start();
+    br.connect(bf); bf.connect(bg); bg.connect(this.master);
     // heartbeat
     this.heart = 0;
   }
@@ -85,6 +90,7 @@ export class GameAudio {
     this.drone.gain.setTargetAtTime(ctx.dread * 0.22, t, 1.5);
     this.whine.gain.setTargetAtTime(ctx.whine * 0.02, t, 0.3);
     this.staticGain.gain.setTargetAtTime(ctx.radio * 0.08, t, 0.2);
+    if (this.breathGain) { const b = ctx.breath || 0; this.breathGain.gain.setTargetAtTime(b * 0.06, t, 1.0); this.breathLfo.gain.setTargetAtTime(b * 0.05, t, 1.0); }
     if (ctx.heartbeat > 0) {
       this.heart += dt;
       const period = 0.9 - ctx.heartbeat * 0.35;
@@ -172,6 +178,31 @@ export class GameAudio {
       speechSynthesis.cancel();
       speechSynthesis.speak(u);
     } catch (e) { /* no voice, no problem */ }
+  }
+  ring(on) {
+    if (!this.started) return;
+    if (!on) { if (this._ring) { clearInterval(this._ring); this._ring = null; } return; }
+    if (this._ring) return;
+    const burst = () => { const C = this.ctx, t = C.currentTime; for (let k = 0; k < 2; k++) { const o = C.createOscillator(); o.type = 'square'; o.frequency.value = 1150; const g = C.createGain(); const st = t + k * 0.9; g.gain.setValueAtTime(0.0001, st); g.gain.linearRampToValueAtTime(0.06, st + 0.02); g.gain.setValueAtTime(0.06, st + 0.45); g.gain.exponentialRampToValueAtTime(0.0001, st + 0.5); const lfo = C.createOscillator(); lfo.frequency.value = 22; const lg = C.createGain(); lg.gain.value = 200; lfo.connect(lg); lg.connect(o.frequency); lfo.start(st); lfo.stop(st + 0.6); o.connect(g); g.connect(this.master); o.start(st); o.stop(st + 0.6); } };
+    burst(); this._ring = setInterval(burst, 2800);
+  }
+  /** Deep rumble (avalanche, rockfall). */
+  rumble(sec = 3) {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    const n = this._noise(); const f = C.createBiquadFilter(); f.type = 'lowpass'; f.frequency.value = 70; f.Q.value = 1.2;
+    const g = C.createGain(); g.gain.setValueAtTime(0.001, t); g.gain.exponentialRampToValueAtTime(0.9, t + 0.6); g.gain.setValueAtTime(0.9, t + sec - 0.8); g.gain.exponentialRampToValueAtTime(0.001, t + sec);
+    n.connect(f); f.connect(g); g.connect(this.master); setTimeout(() => n.stop(), sec * 1000 + 100);
+  }
+  /** Ice cracking: sharp snaps with a long low groan. */
+  crack() {
+    if (!this.started) return;
+    const C = this.ctx, t = C.currentTime;
+    for (let i = 0; i < 4; i++) { const n = this._noise(); const f = C.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 2500; const g = C.createGain(); const st = t + i * (0.08 + Math.random() * 0.2); g.gain.setValueAtTime(0.0001, st); g.gain.exponentialRampToValueAtTime(0.5, st + 0.005); g.gain.exponentialRampToValueAtTime(0.0001, st + 0.06); n.connect(f); f.connect(g); g.connect(this.master); setTimeout(() => n.stop(), 1200); }
+    const o = C.createOscillator(); o.type = 'sawtooth'; o.frequency.setValueAtTime(48, t); o.frequency.exponentialRampToValueAtTime(30, t + 2.5);
+    const lp = C.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 180;
+    const g2 = C.createGain(); g2.gain.setValueAtTime(0.0001, t); g2.gain.exponentialRampToValueAtTime(0.3, t + 0.3); g2.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
+    o.connect(lp); lp.connect(g2); g2.connect(this.master); o.start(t); o.stop(t + 2.7);
   }
   horn() {
     if (!this.started) return;

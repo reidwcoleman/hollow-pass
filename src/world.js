@@ -5,7 +5,8 @@ import * as T from './textures.js';
 import { spruceCardGeometry, spruceGeometry, deadTreeGeometry, boulderGeometry, merge, signMesh, deerMesh, figureMesh } from './props.js';
 import { ObstacleField } from './collision.js';
 import { Traffic } from './traffic.js';
-import { buildBridge, buildTunnel, buildGasStation, buildCemetery, buildOverlook, buildTower, placeAlong } from './setpieces.js';
+import { buildBridge, buildTunnel, buildGasStation, buildCemetery, buildOverlook, buildTower, placeAlong, buildVillage, buildMine, buildAvalanche, buildFallenTree, buildIceSheen, buildConvoy } from './setpieces.js';
+import { buildVehicle } from './traffic.js';
 import { buildSky, MOON_DIR } from './sky.js';
 import { Simplex, mulberry32, clamp, smoothstep, lerp } from './noise.js';
 
@@ -159,6 +160,7 @@ export class World {
     this._lights();
     this._snow();
     this._valleyFog();
+    this._groundFog();
 
     progress('Ready', 1);
   }
@@ -236,9 +238,9 @@ export class World {
     const road = this.road, terrain = this.terrain, N = road.count;
     const feat = terrain.features;
     const busy = new Uint8Array(N);
-    const mark = (i, span) => { for (let k = -span; k <= span; k++) busy[((i + k) % N + N) % N] = 1; };
-    if (feat.bridge) mark(feat.bridge.mid, 110);
-    if (feat.tunnel) mark(feat.tunnel.mid, 100);
+    const mark = (i0, span) => { const i = Math.floor(i0); for (let k = -span; k <= span; k++) busy[((i + k) % N + N) % N] = 1; };
+    for (const b of feat.bridges) mark(b.mid, Math.ceil((b.b - b.a) / 2) + 60);
+    for (const t of feat.tunnels) mark(t.mid, Math.ceil((t.b - t.a) / 2) + 50);
     mark(this.overlookI, 70); mark(this.gasI, 90); mark(this.cemeteryI, 90); mark(this.deadI, 110);
     for (let i = 0; i < N; i++) road.samples[i].biome = 'open';
     // free runs
@@ -259,8 +261,43 @@ export class World {
     if (rest.length) { rest.sort((p, q) => meanY(q) - meanY(p)); const [a, b] = rest[0]; label(a + 8, b - 8, 'alpine'); used.add(rest[0]); }
     const rest2 = runs.filter((r) => !used.has(r) && r[1] - r[0] > 60);
     if (rest2.length) { rest2.sort((p, q) => meanY(p) - meanY(q)); const [a, b] = rest2[0]; label(a + 8, b - 8, 'lake'); used.add(rest2[0]); this.lakeRun = [a, b]; }
-    const rest3 = runs.filter((r) => !used.has(r) && r[1] - r[0] > 60);
-    if (rest3.length) { const [a, b] = rest3[0]; label(a + 8, b - 8, 'forest'); }
+    // village on a flat-ish run of at least 300 m, ridge on the highest remaining run, more forest elsewhere
+    const rest3 = runs.filter((r) => !used.has(r) && r[1] - r[0] > 75);
+    if (rest3.length) {
+      const [a, b] = rest3[0]; used.add(rest3[0]);
+      label(a + 8, b - 8, 'village');
+      this.villageRun = [a + 8, b - 8];
+    }
+    const rest4 = runs.filter((r) => !used.has(r) && r[1] - r[0] > 60);
+    if (rest4.length) { rest4.sort((p, q) => meanY(q) - meanY(p)); const [a, b] = rest4[0]; used.add(rest4[0]); label(a + 8, b - 8, 'ridge'); }
+    for (const r of runs) if (!used.has(r) && r[1] - r[0] > 40) { label(r[0] + 6, r[1] - 6, 'forest'); }
+    // extras inside biomes: avalanche debris near the end of the alpine run, black ice on the last 220 m of the lake run,
+    // a fallen tree in the first forest run, a mine in the canyon, a convoy on the flats
+    const findRun = (name) => { let a = -1; for (let i = 0; i < N * 2; i++) { const isB = road.samples[i % N].biome === name; if (isB && a < 0) a = i; if (!isB && a >= 0) return [a, i]; } return null; };
+    const alp = findRun('alpine'); if (alp && alp[1] - alp[0] > 120) { this.avalancheI = alp[1] - 70; this.convoyI = alp[0] + 30; }
+    const lk = findRun('lake'); if (lk && lk[1] - lk[0] > 50) { this.iceRun = [lk[1] - 45, lk[1] - 4]; for (let i = this.iceRun[0]; i < this.iceRun[1]; i++) road.samples[i % N].ice = true; }
+    const fr = findRun('forest'); if (fr && fr[1] - fr[0] > 80) this.fallenI = fr[0] + Math.floor((fr[1] - fr[0]) * 0.6);
+    const cn = findRun('canyon'); if (cn && cn[1] - cn[0] > 60) this.mineI = cn[0] + Math.floor((cn[1] - cn[0]) * 0.45);
+    // village layout is planned now so its pads flatten the terrain before it is built
+    if (this.villageRun) {
+      const [a, b] = this.villageRun;
+      const rnd = mulberry32(4141);
+      this.villagePlan = { s: road.samples[a % N].s, len: (b - a) * 4 };
+      let ss = this.villagePlan.s + 40, k = 0;
+      while (ss < this.villagePlan.s + this.villagePlan.len - 40) {
+        const side = k % 2 === 0 ? 1 : -1;
+        const p = road.at(ss);
+        const w = 7 + rnd() * 4, d = 6 + rnd() * 3; rnd(); // h
+        const off = side * (ROAD_WIDTH / 2 + 7 + rnd() * 4);
+        const cx = p.x + p.nx * off, cz = p.z + p.nz * off;
+        terrain.pads.push({ x: cx, z: cz, r: Math.max(w, d) * 0.7 + 2, y: p.y - 0.4 });
+        rnd(); // yaw jitter
+        ss += 34 + rnd() * 30; k++;
+      }
+      const pc = road.at(this.villagePlan.s + this.villagePlan.len - 60);
+      terrain.pads.push({ x: pc.x + pc.nx * (ROAD_WIDTH / 2 + 14), z: pc.z + pc.nz * (ROAD_WIDTH / 2 + 14), r: 14, y: pc.y - 0.5 });
+    }
+    if (this.mineI !== undefined) { const p = road.samples[this.mineI % N]; const side = 1; this.mineSide = side; terrain.pads.push({ x: p.x + p.nx * side * (ROAD_WIDTH / 2 + 7), z: p.z + p.nz * side * (ROAD_WIDTH / 2 + 7), r: 6, y: p.y }); }
     // lake geometry: a basin on the flatter side of the lake run
     if (this.lakeRun) {
       const [a, b] = this.lakeRun; const mi = Math.floor((a + b) / 2) % N; const sm = road.samples[mi];
@@ -283,6 +320,8 @@ export class World {
         if (bm === 'canyon') add("Devil's Throat", i, 'rockfall zone · no stopping', 'canyon');
         if (bm === 'alpine') add('Ptarmigan Flats', i, 'exposed · high wind', 'alpine');
         if (bm === 'lake') add('Lake Nowhere', i, 'thin ice', 'lake');
+        if (bm === 'village') add('Ashwood', i, 'pop. 212 · no through road', 'village');
+        if (bm === 'ridge') add('The Spine', i, 'no guardrail · 300 m drop', 'ridge');
         last = bm;
       }
     }
@@ -336,7 +375,17 @@ export class World {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     g.setIndex(idx); g.computeVertexNormals();
-    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xc8d2e4, roughness: 1, flatShading: false }));
+    // steep faces are bare rock, gentle ones snow
+    const nrm = g.attributes.normal, col = new Float32Array(pos.length);
+    for (let i = 0; i < nrm.count; i++) {
+      const ny = nrm.getY(i);
+      const rock = smoothstep(0.82, 0.55, ny);
+      const x = pos[i * 3], z = pos[i * 3 + 2];
+      const v = 0.9 + sx.fbm(x / 700, z / 700, 2) * 0.15;
+      col[i * 3] = lerp(0.78, 0.22, rock) * v; col[i * 3 + 1] = lerp(0.83, 0.21, rock) * v; col[i * 3 + 2] = lerp(0.92, 0.22, rock) * v;
+    }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors: true, roughness: 1, flatShading: false }));
     m.receiveShadow = false;
     return m;
   }
@@ -347,7 +396,7 @@ export class World {
     const hw = ROAD_WIDTH / 2 + 1.5;
     for (let i = 0; i < N; i++) {
       const s = road.samples[i], s1 = road.samples[(i + 1) % N];
-      if (s.bridge || s.tunnel) continue;
+      if (s.bridge || s.tunnel || s.biome === 'ridge') continue;
       for (const side of [-1, 1]) {
         const dropX = s.x + s.nx * side * 12, dropZ = s.z + s.nz * side * 12;
         const drop = s.y - terrain.heightAt(dropX, dropZ);
@@ -509,13 +558,21 @@ export class World {
   _setPieces() {
     const road = this.road, terrain = this.terrain, mats = this.mats, N = road.count;
     const add = (r) => { this.scene.add(r.group); this.fixtures.push(...r.fixtures); if (r.sign) this.scene.add(r.sign); return r; };
-    this.bridge = add(buildBridge(road, terrain, mats));
-    this.tunnel = add(buildTunnel(road, terrain, mats));
+    this.bridges = terrain.features.bridges.map((f) => add(buildBridge(road, terrain, mats, f)));
+    this.tunnels = terrain.features.tunnels.map((f) => add(buildTunnel(road, terrain, mats, f)));
+    this.bridge = this.bridges[0] || { group: new THREE.Group(), fixtures: [] };
+    this.tunnel = this.tunnels[0] || { group: new THREE.Group(), fixtures: [] };
+    if (this.villagePlan) this.village = add(buildVillage(road, terrain, mats, this.villagePlan.s, this.villagePlan.len));
+    if (this.mineI !== undefined) this.mine = add(buildMine(road, terrain, mats, road.samples[this.mineI % N].s, this.mineSide));
+    if (this.avalancheI !== undefined) this.avalanche = add(buildAvalanche(road, terrain, mats, road.samples[this.avalancheI % N].s));
+    if (this.fallenI !== undefined) this.fallen = add(buildFallenTree(road, terrain, mats, road.samples[this.fallenI % N].s, 1));
+    if (this.iceRun) { this.ice = add(buildIceSheen(road, mats, this.iceRun[0], this.iceRun[1])); this.ice.group.children[0].material.envMap = this.envMap; }
+    if (this.convoyI !== undefined) this.convoy = add(buildConvoy(road, terrain, mats, road.samples[this.convoyI % N].s, 1, buildVehicle));
     this.gas = add(buildGasStation(road, terrain, mats, road.samples[this.gasI].s, this.gasSide));
     this.cemetery = add(buildCemetery(road, terrain, mats, road.samples[this.cemeteryI].s, this.cemeterySide));
     this.overlook = add(buildOverlook(road, terrain, mats, road.samples[this.overlookI].s, this.overlookSide, road.samples[this.overlookI].y));
     if (this.towerXZ) this.tower = add(buildTower(terrain, mats, this.towerXZ[0], this.towerXZ[1]));
-    for (const r of [this.bridge, this.tunnel, this.gas, this.cemetery, this.overlook, this.tower]) if (r && r.obstacles) for (const o of r.obstacles) this.obstacles.add(o.x, o.z, o.r, o.kind || 'building');
+    for (const r of [...this.bridges, ...this.tunnels, this.gas, this.cemetery, this.overlook, this.tower, this.village, this.mine, this.avalanche, this.fallen, this.ice, this.convoy]) if (r && r.obstacles) for (const o of r.obstacles) this.obstacles.add(o.x, o.z, o.r, o.kind || 'building');
     if (this.towerXZ) for (let i = 0; i < 3; i++) { const a = (i / 3) * Math.PI * 2; this.obstacles.add(this.towerXZ[0] + Math.cos(a) * 2.2, this.towerXZ[1] + Math.sin(a) * 2.2, 0.3, 'building'); }
     // warning signs ahead of each section
     const signs = [
@@ -615,6 +672,27 @@ export class World {
     this.scene.add(this.snow);
   }
 
+  /** Low ground fog: soft billboards that drift slowly along the road in the forest, by the lake and in the burn. */
+  _groundFog() {
+    const road = this.road, N = road.count, terrain = this.terrain;
+    const mat = new THREE.SpriteMaterial({ map: T.glowSprite(128, 0, 'rgba(150,170,200,1)'), transparent: true, depthWrite: false, opacity: 0.3, color: 0x8fa2be, blending: THREE.NormalBlending, fog: true });
+    this.wisps = [];
+    const rnd = mulberry32(555);
+    for (let i = 0; i < N; i += 6) {
+      const s = road.samples[i];
+      if (!(s.biome === 'forest' || s.biome === 'lake' || s.biome === 'open')) continue;
+      if (s.bridge || s.tunnel) continue;
+      if (rnd() > 0.55) continue;
+      const sp = new THREE.Sprite(mat);
+      const lat = (rnd() - 0.5) * 24;
+      const x = s.x + s.nx * lat, z = s.z + s.nz * lat;
+      sp.position.set(x, terrain.heightAt(x, z) + 0.6 + rnd() * 0.8, z);
+      sp.scale.set(18 + rnd() * 18, 3.5 + rnd() * 3, 1);
+      sp.userData = { x, z, phase: rnd() * 10, tx: s.tx, tz: s.tz };
+      this.scene.add(sp); this.wisps.push(sp);
+    }
+  }
+
   _valleyFog() {
     // Two drifting cloud decks that sit in the valleys; from the pass they read as a sea of cloud.
     const road = this.road;
@@ -658,6 +736,12 @@ export class World {
     this.snow.material.uniforms.uLampPos.value.copy(headLampPos);
     this.snow.material.uniforms.uLampDir.value.copy(headLampDir);
     for (const d of this.fogDecks) { d.material.uniforms.uTime.value = t; d.material.uniforms.uCam.value.copy(camPos); }
+    if (this.wisps) for (const sp of this.wisps) {
+      const u = sp.userData; const dx = sp.position.x - carPos.x, dz = sp.position.z - carPos.z;
+      if (dx * dx + dz * dz > 250 * 250) { sp.visible = false; continue; }
+      sp.visible = true;
+      sp.position.x = u.x + Math.sin(t * 0.07 + u.phase) * 6 * u.tx; sp.position.z = u.z + Math.sin(t * 0.07 + u.phase) * 6 * u.tz;
+    }
     // moon shadow frustum follows the car
     this.moon.target.position.copy(carPos);
     this.moon.position.copy(carPos).addScaledVector(MOON_DIR, 400);

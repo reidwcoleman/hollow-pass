@@ -131,6 +131,7 @@ export class Traffic {
     }
     for (const v of this.vehicles) {
       if (!v.alive) continue;
+      if (v.parked) { v.cur = 0; this._place(v); v.dist = Math.hypot(v.x - car.pos.x, v.z - car.pos.z); continue; }
       v.age += dt;
       // follow the road; slow down a little for curves
       const p = road.at(v.s);

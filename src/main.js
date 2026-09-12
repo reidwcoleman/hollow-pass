@@ -206,6 +206,7 @@ function updateCamera(dt, snap = false) {
   }
   // road texture shake at speed / off-road
   shake = lerp(shake, (physics.onRoad ? 0.002 : 0.02) * spd, 1 - Math.exp(-dt * 4));
+  if (events && events.hitShakeExt) { hitShake = Math.max(hitShake, events.hitShakeExt); events.hitShakeExt = Math.max(0, events.hitShakeExt - dt * 0.35); }
   hitShake *= Math.exp(-dt * 4);
   camera.position.y += (Math.random() - 0.5) * (shake + hitShake * 0.5);
   camera.position.x += (Math.random() - 0.5) * hitShake * 0.4;

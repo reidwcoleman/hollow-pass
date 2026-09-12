@@ -210,90 +210,150 @@ export function buildCar(tex, envMap) {
   };
 }
 
-/** Arcade-leaning car physics with slip, weight transfer for the camera, surface grip and terrain following. */
+/**
+ * Car physics with a real drivetrain: torque curve, 6-speed automatic with
+ * shift cuts, traction-limited drive on packed snow, aero and rolling drag,
+ * engine braking, ABS-style braking, a bicycle-model yaw with understeer when
+ * the tyres run out of grip, and a corner assist that eases the throttle and
+ * brakes for bends it can see coming.
+ */
+const MASS = 2150, WHEEL_R = 0.42, WHEELBASE = 2.95, FINAL = 3.73, EFF = 0.9;
+const GEARS = [4.1, 2.45, 1.6, 1.16, 0.86, 0.66];
+const torqueAt = (rpm) => { // Nm, flat-ish diesel-like curve peaking ~3400
+  const x = rpm / 1000;
+  if (x < 0.8) return 220 + x * 150;
+  if (x < 3.2) return 340 + (x - 0.8) * 75;
+  if (x < 5.0) return 520 - (x - 3.2) * 50;
+  return Math.max(80, 430 - (x - 5.0) * 300);
+};
 export class CarPhysics {
   constructor(terrain, road, world) {
     this.terrain = terrain; this.road = road; this.world = world;
     this.ground = (x, z) => (world ? world.groundAt(x, z) : terrain.heightAt(x, z));
     this.pos = new THREE.Vector3();
-    this.heading = 0;          // yaw
-    this.vel = new THREE.Vector3(); // world velocity (xz)
-    this.speed = 0;            // forward speed (m/s), signed
-    this.lateral = 0;
-    this.steer = 0;
-    this.rpm = 0.2; this.gear = 1;
+    this.heading = 0;
+    this.vel = new THREE.Vector3();
+    this.speed = 0; this.lateral = 0; this.steer = 0;
+    this.rpm = 0.15; this.rpmReal = 800; this.gear = 1; this.shiftT = 0;
     this.throttle = 0; this.brake = 0; this.handbrake = false;
     this.pitch = 0; this.roll = 0;
-    this.onRoad = true; this.roadDist = 0; this.roadS = 0;
-    this.wheelSpin = 0;
-    this.slip = 0;
-    this.airborne = false;
-    this.up = new THREE.Vector3(0, 1, 0);
-    this.quat = new THREE.Quaternion();
-    this.headingVec = new THREE.Vector3();
+    this.onRoad = true; this.roadDist = 0; this.roadS = 0; this.lateralOnRoad = -2.2;
+    this.wheelSpin = 0; this.slip = 0; this.wheelspin = 0; this.airborne = false;
+    this.assistBrake = 0; this.assist = true;
+    this.mu = 0.62;
   }
 
   placeOnRoad(s, offset = -2) {
     const p = this.road.at(s);
     this.pos.set(p.x + p.nx * offset, p.y, p.z + p.nz * offset);
     this.heading = Math.atan2(p.tx, p.tz);
-    this.vel.set(0, 0, 0); this.speed = 0;
+    this.vel.set(0, 0, 0); this.speed = 0; this.gear = 1; this.rpmReal = 800;
+  }
+
+  /** Highest safe speed for the road ahead (m/s), from the curvature of the next ~80 m. */
+  safeSpeedAhead() {
+    let vmin = 99;
+    for (let d = 12; d <= 90; d += 13) {
+      const p = this.road.at(this.roadS + d);
+      const k = Math.abs(p.curv) + 1e-4;
+      const v = Math.sqrt(this.mu * 9.81 * 0.7 / k) + 1.0;
+      // the further the bend, the more room to slow: allow more speed now
+      vmin = Math.min(vmin, v + d * 0.08);
+    }
+    return vmin;
   }
 
   step(dt, input) {
-    const { throttle, brake, steer, handbrake } = input;
-    const t = this.terrain;
-    // surface
+    let { throttle, brake, steer, handbrake } = input;
     const n = this.road.nearest(this.pos.x, this.pos.z, 80);
     this.roadDist = n ? n.d : 999;
     this.roadS = n ? n.s : this.roadS;
+    this.lateralOnRoad = n ? n.lateral : this.lateralOnRoad;
     this.onRoad = this.roadDist < 4.2;
     const shoulder = this.roadDist >= 4.2 && this.roadDist < 6.2;
-    const grip = this.onRoad ? 1.0 : shoulder ? 0.7 : 0.45;
+    const ice = n && n.sample.ice && this.onRoad;
+    const mu = this.mu = ice ? 0.22 : this.onRoad ? 0.62 : shoulder ? 0.45 : 0.32;
     const drag = this.onRoad ? 0.0 : shoulder ? 0.6 : 2.2;
 
-    // steering: reduce lock at speed
-    const maxLock = 0.55 / (1 + Math.abs(this.speed) * 0.045);
-    const targetSteer = steer * maxLock;
-    this.steer = lerp(this.steer, targetSteer, 1 - Math.exp(-dt * 9));
+    // ---- corner assist: ease off and brake for bends the driver is carrying too much speed into ----
+    const vSafe = this.safeSpeedAhead();
+    let assist = 0;
+    if (this.assist && this.speed > vSafe) {
+      const over = this.speed - vSafe;
+      throttle *= clamp(1 - over / 4, 0.15, 1);
+      assist = clamp((over - 1.5) / 7, 0, 0.45);
+      brake = Math.max(brake, assist);
+    }
+    this.assistBrake = assist;
 
-    // longitudinal
-    const engineForce = throttle * (this.speed >= -0.5 ? 1 : 0.45) * (10.5 - clamp(Math.abs(this.speed) / 60, 0, 1) * 5.5) * (0.5 + grip * 0.5);
-    const brakeForce = brake * (this.speed > 0.2 ? 18 : this.speed < -0.2 ? 18 : 0);
-    let reverse = 0;
-    if (brake > 0 && Math.abs(this.speed) < 0.3) reverse = -4.5 * brake; // hold brake at rest to reverse
-    const rolling = 0.35 + drag * 1.2;
-    const aero = 0.0038 * this.speed * Math.abs(this.speed);
-    let a = engineForce + reverse - Math.sign(this.speed) * (brakeForce + rolling) - aero;
-    if (handbrake) a -= Math.sign(this.speed) * 6;
-    // hills: gravity component along heading
+    // ---- steering: speed-sensitive lock ----
+    const maxLock = 0.6 / (1 + Math.abs(this.speed) * 0.05);
+    this.steer = lerp(this.steer, steer * maxLock, 1 - Math.exp(-dt * 9));
+
+    // ---- drivetrain ----
+    const v = this.speed, absV = Math.abs(v);
+    this.shiftT = Math.max(0, this.shiftT - dt);
+    const ratio = GEARS[this.gear - 1] * FINAL;
+    let rpm = absV / WHEEL_R * ratio * 60 / (2 * Math.PI);
+    rpm = Math.max(800, rpm);
+    if (this.shiftT <= 0) {
+      if (rpm > 5100 && this.gear < 6) { this.gear++; this.shiftT = 0.28; }
+      else if (rpm < 1900 && this.gear > 1) { this.gear--; this.shiftT = 0.2; }
+    }
+    // kick-down: flooring it at low rpm in a high gear drops a gear
+    if (throttle > 0.9 && rpm < 2600 && this.gear > 1 && this.shiftT <= 0) { this.gear--; this.shiftT = 0.25; }
+    this.rpmReal = lerp(this.rpmReal, this.shiftT > 0 ? rpm * 0.85 : rpm + throttle * 250, 1 - Math.exp(-dt * 8));
+    this.rpm = clamp((this.rpmReal - 700) / 5200, 0.05, 1.0); // 0..1 for audio
+    const torque = torqueAt(this.rpmReal) * (this.shiftT > 0 ? 0.1 : 1);
+    let driveF = 0;
+    const reversing = v < -0.3 || (absV < 0.3 && brake > 0.5 && throttle < 0.1);
+    if (throttle > 0 && !reversing) driveF = torque * ratio / WHEEL_R * EFF * throttle;
+    // reverse: hold brake at a standstill
+    let reverseF = 0;
+    if (brake > 0 && absV < 0.4 && throttle < 0.1) reverseF = -3200 * brake;
+    if (v < -0.3 && brake > 0) reverseF = -3200 * brake;
+    // traction limit on the driven wheels (4wd, ~all the weight)
+    const fMax = mu * MASS * 9.81 * 0.9;
+    this.wheelspin = 0;
+    if (driveF > fMax) { this.wheelspin = clamp((driveF - fMax) / fMax, 0, 1); driveF = fMax * 0.8; }
+    // resistances
+    const aero = 0.5 * 1.25 * 0.38 * 2.8 * v * absV;        // ½ρ·Cd·A·v²
+    const rolling = (0.012 + drag * 0.05) * MASS * 9.81 * Math.sign(v);
+    const engineBrake = throttle < 0.05 && absV > 1 ? Math.sign(v) * (250 + this.rpmReal * 0.08) * ratio * 0.12 : 0;
+    // brakes: ABS keeps it at the friction limit, no lock-up
+    let brakeF = 0;
+    if (brake > 0 && absV > 0.3 && !(v < 0 && reverseF !== 0)) brakeF = Math.sign(v) * Math.min(brake * 16500, mu * MASS * 9.81 * 0.95);
+    if (handbrake && absV > 0.3) brakeF += Math.sign(v) * mu * MASS * 9.81 * 0.35;
+    // grade
     const fx = Math.sin(this.heading), fz = Math.cos(this.heading);
     const hAhead = this.ground(this.pos.x + fx * 2.5, this.pos.z + fz * 2.5);
     const hBack = this.ground(this.pos.x - fx * 2.5, this.pos.z - fz * 2.5);
     const grade = (hAhead - hBack) / 5;
-    a -= grade * 9.81 * 0.9;
-    this.speed += a * dt;
-    if (Math.abs(this.speed) < 0.05 && throttle === 0 && reverse === 0) this.speed = 0;
-    this.speed = clamp(this.speed, -12, 62);
+    const gradeF = -grade * MASS * 9.81 * 0.95;
+    // tyre scrub in corners bleeds speed
+    const scrub = Math.abs(this.steer) * absV * 0.9 * MASS * 0.35;
+    const F = driveF + reverseF - aero - rolling - engineBrake - brakeF + gradeF - Math.sign(v) * scrub;
+    this.speed += (F / MASS) * dt;
+    if (Math.abs(this.speed) < 0.08 && throttle === 0 && reverseF === 0) this.speed = 0;
+    this.speed = clamp(this.speed, -8, 52);
 
-    // yaw rate from steering with slip at low grip / handbrake
-    const slipFactor = handbrake ? 0.35 : grip;
-    const yawRate = this.steer * this.speed * 0.32 * (0.6 + slipFactor * 0.4) / (1 + Math.abs(this.speed) * 0.012);
+    // ---- yaw: bicycle model with understeer past the grip limit ----
+    let yawRate = absV > 0.2 ? this.speed * Math.tan(this.steer) / WHEELBASE : 0;
+    const latDemand = Math.abs(this.speed * yawRate);
+    const latMax = mu * 9.81 * (handbrake ? 0.55 : 1.0);
+    let slide = 0;
+    if (latDemand > latMax) { const k = latMax / latDemand; yawRate *= k; slide = (latDemand - latMax) * (this.steer > 0 ? 1 : -1); }
     this.heading += yawRate * dt;
-
-    // lateral velocity (drift): heading vs. velocity direction
     const vx = this.vel.x, vz = this.vel.z;
-    const fwd = vx * fx + vz * fz;
-    const lat = vx * -fz + vz * fx; // right-hand lateral (x' = -fz, z' = fx)
-    const latDecay = Math.exp(-dt * (handbrake ? 2.2 : 3.0 + grip * 9));
-    const newLat = lat * latDecay;
+    const lat = vx * -fz + vz * fx;
+    const latDecay = Math.exp(-dt * (handbrake ? 1.6 : 2.5 + mu * 10));
+    const newLat = lat * latDecay - slide * dt * 0.9 + (handbrake ? this.steer * absV * dt * 0.8 : 0);
     this.lateral = newLat;
-    this.slip = clamp(Math.abs(newLat) / 6, 0, 1);
+    this.slip = clamp(Math.abs(newLat) / 5 + this.wheelspin * 0.5, 0, 1);
     const nvx = fx * this.speed + (-fz) * newLat;
     const nvz = fz * this.speed + fx * newLat;
     this.vel.set(nvx, 0, nvz);
     this.pos.x += nvx * dt; this.pos.z += nvz * dt;
-
     // hard barriers: bridge railings, tunnel walls
     if (this.world) {
       const b = this.world.barrierAt(this.pos.x, this.pos.z);
@@ -333,16 +393,7 @@ export class CarPhysics {
     if (dy > 0) this.pos.y += dy * Math.min(1, dt * 14); else { this.vy = (this.vy || 0) - 9.81 * dt; this.pos.y = Math.max(ground, this.pos.y + this.vy * dt); if (this.pos.y <= ground) this.vy = 0; this.airborne = this.pos.y > ground + 0.3; }
     if (dy > -0.05) this.vy = 0;
 
-    // engine sim
-    const absV = Math.abs(this.speed);
-    const gears = [0, 9, 17, 27, 40, 62];
-    let g = 1; for (let i = 1; i < gears.length; i++) if (absV > gears[i] * 0.92) g = i + 1;
-    g = clamp(g, 1, 5);
-    this.gear = g;
-    const lo = gears[g - 1], hi = gears[g];
-    const rpmTarget = clamp(0.18 + (absV - lo) / (hi - lo) * 0.8, 0.15, 1.0) + throttle * 0.05;
-    this.rpm = lerp(this.rpm, rpmTarget, 1 - Math.exp(-dt * 6));
-    this.wheelSpin += this.speed * dt / 0.42;
+    this.wheelSpin += this.speed * dt / WHEEL_R;
     this.throttle = throttle; this.brake = brake; this.handbrake = handbrake;
     return this;
   }

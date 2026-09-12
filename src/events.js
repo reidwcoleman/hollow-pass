@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { clamp, lerp, smoothstep, Simplex } from './noise.js';
 import { figureMesh } from './props.js';
 import { glowSprite } from './textures.js';
+import { initScares2, updateScares2 } from './scares2.js';
 
 const sx = new Simplex(8);
 const LINES = [
@@ -31,6 +32,7 @@ export class Events {
     this.voiceT = 70;
     this.tall = null;
     this.lantern = null;
+    initScares2(this);
   }
 
   _dist(a, b) { const L = this.world.road.length; let d = ((a - b) % L + L) % L; return d > L / 2 ? d - L : d; }
@@ -232,6 +234,11 @@ export class Events {
       if (this.flickerLeft <= 0) this.carMesh.setHeadlights(this.headlightsWanted && !this.ctx.stalled);
     }
 
+    // second wave of scares (mutates the mood object)
+    const mood = { dread, fog, aurora, heartbeat, whine, radio, inTunnel: this.ctx.inTunnel, breath: 0 };
+    updateScares2(this, dt, mood, biome, kind, cur);
+    ({ dread, fog, aurora, heartbeat, whine, radio } = mood);
+    this.ctx.breath = mood.breath;
     const k = 1 - Math.exp(-dt * 0.8);
     this.ctx.dread = lerp(this.ctx.dread, dread, k);
     this.ctx.heartbeat = lerp(this.ctx.heartbeat, heartbeat, k * 2);

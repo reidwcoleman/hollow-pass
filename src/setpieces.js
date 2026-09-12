@@ -25,8 +25,7 @@ export function placeAlong(obj, road, s, lateral, yOff = 0, yaw = 0) {
 }
 
 /** Widow's Bridge: concrete deck on tall piers, steel railings, sodium lamps that stutter. */
-export function buildBridge(road, terrain, mats) {
-  const f = terrain.features.bridge;
+export function buildBridge(road, terrain, mats, f = terrain.features.bridge) {
   if (!f) return { group: new THREE.Group(), fixtures: [] };
   const g = new THREE.Group();
   const fixtures = [];
@@ -85,7 +84,7 @@ export function buildBridge(road, terrain, mats) {
   railMesh.castShadow = true;
   g.add(railMesh);
   // name plaques at both ends
-  const tex = signTexture(["WIDOW'S BRIDGE", 'est. 1931'], { bg: '#2b2e2c', fg: '#d8d4c4', w: 512, h: 200 });
+  const tex = signTexture(f.index ? ['SORROW CREEK', 'bridge · 1957'] : ["WIDOW'S BRIDGE", 'est. 1931'], { bg: '#2b2e2c', fg: '#d8d4c4', w: 512, h: 200 });
   for (const [ss, yaw] of [[road.samples[((a - 4) % N + N) % N].s, 0], [road.samples[(b + 4) % N].s, Math.PI]]) {
     const sign = signMesh(tex, 2.2, 0.85, 2.0, mats);
     placeAlong(sign, road, ss, yaw === 0 ? 6.5 : -6.5, 0, yaw);
@@ -95,8 +94,7 @@ export function buildBridge(road, terrain, mats) {
 }
 
 /** Mercy Tunnel: a lined half-cylinder bore with portals and a row of flickering fixtures. */
-export function buildTunnel(road, terrain, mats) {
-  const f = terrain.features.tunnel;
+export function buildTunnel(road, terrain, mats, f = terrain.features.tunnel) {
   if (!f) return { group: new THREE.Group(), fixtures: [] };
   const g = new THREE.Group();
   const fixtures = [];
@@ -178,7 +176,7 @@ export function buildTunnel(road, terrain, mats) {
     cornice.position.set(0, 10.6, 0); cornice.castShadow = true; facade.add(cornice);
     const arch = new THREE.Mesh(new THREE.TorusGeometry(R + 0.25, 0.45, 8, 24, Math.PI), mats.concreteDark);
     arch.position.set(0, 0.2, dir * 1.3); facade.add(arch);
-    const plaque = signMesh(signTexture(['MERCY TUNNEL', '1948   ·   0.48 km'], { bg: '#26292b', fg: '#cfc9b7', w: 512, h: 180 }), 4.2, 1.5, 0, mats);
+    const plaque = signMesh(signTexture(f.index ? ['SILENT BORE', '1963'] : ['MERCY TUNNEL', '1948   ·   0.48 km'], { bg: '#26292b', fg: '#cfc9b7', w: 512, h: 180 }), 4.2, 1.5, 0, mats);
     plaque.position.set(0, R * 0.82 + 1.0, dir * 1.35); plaque.rotation.y = dir > 0 ? 0 : Math.PI; facade.add(plaque);
     g.add(facade);
     // portal lamps
@@ -383,4 +381,188 @@ export function buildTower(terrain, mats, x, z) {
   const g = new THREE.Group(); g.add(t, hut);
   const bw = new THREE.Vector3(); t.updateMatrixWorld(true); t.userData.beacon.getWorldPosition(bw);
   return { group: g, beacon: t.userData.beacon, fixtures: [{ pos: bw, color: new THREE.Color(0xff2020), intensity: 400, range: 90, flicker: 'beacon', bulb: t.userData.beacon }] };
+}
+
+
+/** Ashwood: a dead village along the road. Dark houses, one lit window, a church, a bus shelter, a phone box. */
+export function buildVillage(road, terrain, mats, sStart, len) {
+  const g = new THREE.Group();
+  const fixtures = [], obstacles = [], pads = [];
+  const rnd = mulberry32(4141);
+  const house = (s, side, w, d, h, lit) => {
+    const p = road.at(s);
+    const off = side * (ROAD_WIDTH / 2 + 7 + rnd() * 4);
+    const cx = p.x + p.nx * off, cz = p.z + p.nz * off;
+    const cy = terrain.heightAt(cx, cz);
+    const hg = new THREE.Group();
+    hg.position.set(cx, cy - 0.2, cz); hg.rotation.y = Math.atan2(p.tx, p.tz) + (rnd() - 0.5) * 0.3;
+    const walls = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mats.woodOld); walls.position.y = h / 2; walls.castShadow = true; walls.receiveShadow = true; hg.add(walls);
+    const roofG = new THREE.Shape(); roofG.moveTo(-w / 2 - 0.4, 0); roofG.lineTo(w / 2 + 0.4, 0); roofG.lineTo(0, w * 0.45); roofG.closePath();
+    const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(roofG, { depth: d + 0.8, bevelEnabled: false }), mats.panelRust);
+    roof.rotation.y = 0; roof.position.set(0, h, -d / 2 - 0.4); roof.castShadow = true; hg.add(roof);
+    const snowRoof = new THREE.Mesh(new THREE.ExtrudeGeometry(roofG, { depth: d + 0.8, bevelEnabled: false }), mats.snowCap);
+    snowRoof.scale.set(1, 1.04, 1); snowRoof.position.set(0, h + 0.02, -d / 2 - 0.4); hg.add(snowRoof);
+    for (const wx of [-w / 4, w / 4]) {
+      const win = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 1.1), lit && wx > 0 ? new THREE.MeshStandardMaterial({ color: 0x201000, emissive: 0xffb050, emissiveIntensity: 2.5 }) : new THREE.MeshPhysicalMaterial({ color: 0x05080c, roughness: 0.1, clearcoat: 1 }));
+      win.position.set(wx, h * 0.55, side > 0 ? -d / 2 - 0.01 : d / 2 + 0.01); win.rotation.y = side > 0 ? Math.PI : 0; hg.add(win);
+      if (lit && wx > 0) { const wp = new THREE.Vector3(); hg.updateMatrixWorld(true); win.getWorldPosition(wp); fixtures.push({ pos: wp, color: new THREE.Color(0xffb050), intensity: 35, range: 16, flicker: 'candle', bulb: win }); }
+    }
+    const door = new THREE.Mesh(new THREE.BoxGeometry(0.9, 2.0, 0.08), mats.iron); door.position.set(0, 1.0, side > 0 ? -d / 2 - 0.02 : d / 2 + 0.02); hg.add(door);
+    const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.6, 1.4, 0.6), mats.brick); chimney.position.set(w * 0.3, h + w * 0.3, 0); hg.add(chimney);
+    g.add(hg);
+    obstacles.push(...wallCircles(hg, -w / 2, 0, w / 2, 0, d / 2 + 0.2));
+    pads.push({ x: cx, z: cz, r: Math.max(w, d) * 0.7 + 2, y: cy - 0.2 });
+    return hg;
+  };
+  let s = sStart + 40, k = 0;
+  while (s < sStart + len - 40) {
+    const side = k % 2 === 0 ? 1 : -1;
+    house(s, side, 7 + rnd() * 4, 6 + rnd() * 3, 3 + rnd() * 1.2, k === 3);
+    s += 34 + rnd() * 30; k++;
+  }
+  // church at the end, on the left
+  {
+    const p = road.at(sStart + len - 60);
+    const off = ROAD_WIDTH / 2 + 14;
+    const cx = p.x + p.nx * off, cz = p.z + p.nz * off, cy = terrain.heightAt(cx, cz);
+    const cg = new THREE.Group(); cg.position.set(cx, cy - 0.3, cz); cg.rotation.y = Math.atan2(p.tx, p.tz) + Math.PI / 2;
+    const nave = new THREE.Mesh(stoneWallGeometry(14, 6, 7), mats.stone); nave.scale.z = 12; nave.position.y = 3; nave.castShadow = true; cg.add(nave);
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(4, 14, 4), mats.stone); tower.position.set(-8, 7, 0); tower.castShadow = true; cg.add(tower);
+    const spire = new THREE.Mesh(new THREE.ConeGeometry(2.8, 7, 4), mats.panelRust); spire.position.set(-8, 17.5, 0); spire.rotation.y = Math.PI / 4; cg.add(spire);
+    const bell = new THREE.Mesh(new THREE.SphereGeometry(0.45, 10, 8), mats.iron); bell.position.set(-8, 12.5, 0); cg.add(bell);
+    for (const side of [-1, 1]) { const win = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 3), new THREE.MeshStandardMaterial({ color: 0x100510, emissive: 0x6030a0, emissiveIntensity: 0.6 })); win.position.set(0, 3.5, side * 3.55); win.rotation.y = side > 0 ? 0 : Math.PI; cg.add(win); }
+    g.add(cg);
+    obstacles.push(...wallCircles(cg, -10, 0, 7, 0, 4.0));
+    pads.push({ x: cx, z: cz, r: 14, y: cy - 0.3 });
+    g.userData.church = cg;
+  }
+  // bus shelter + phone box with a flickering light near the middle
+  {
+    const p = road.at(sStart + len * 0.5);
+    const off = -(ROAD_WIDTH / 2 + 2.6);
+    const bx = p.x + p.nx * off, bz = p.z + p.nz * off, by = terrain.heightAt(bx, bz);
+    const sh = new THREE.Group(); sh.position.set(bx, by, bz); sh.rotation.y = Math.atan2(p.tx, p.tz);
+    const back = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.3, 0.08), mats.iron); back.position.set(0, 1.15, -0.9); sh.add(back);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(3.4, 0.08, 2.0), mats.iron); roof.position.set(0, 2.35, 0); sh.add(roof);
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.08, 0.5), mats.woodOld); bench.position.set(0, 0.55, -0.5); sh.add(bench);
+    const tube = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.05, 0.08), new THREE.MeshStandardMaterial({ color: 0xe0f0ff, emissive: 0xc8e8ff, emissiveIntensity: 4 })); tube.position.set(0, 2.28, 0); sh.add(tube);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.4, 1.0), new THREE.MeshStandardMaterial({ color: 0x8a1a1a, roughness: 0.5, metalness: 0.3 })); box.position.set(3.0, 1.2, -0.4); sh.add(box);
+    const boxGlass = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.6, 0.8), new THREE.MeshPhysicalMaterial({ color: 0x0a0f14, roughness: 0.1, clearcoat: 1, transparent: true, opacity: 0.6 })); boxGlass.position.set(3.0, 1.35, -0.4); sh.add(boxGlass);
+    g.add(sh);
+    sh.updateMatrixWorld(true);
+    const tp = new THREE.Vector3(); tube.getWorldPosition(tp);
+    fixtures.push({ pos: tp.add(new THREE.Vector3(0, -0.3, 0)), color: new THREE.Color(0xbfe0ff), intensity: 90, range: 14, flicker: 'fluorescent', bulb: tube });
+    obstacles.push(circ(sh, 0, -0.9, 1.6), circ(sh, 3.0, -0.4, 0.7));
+    g.userData.phone = box;
+    const phoneWorld = new THREE.Vector3(); box.getWorldPosition(phoneWorld); g.userData.phonePos = phoneWorld;
+  }
+  const sign = signMesh(signTexture(['ASHWOOD', 'pop. 212'], { bg: '#0b3d1f', fg: '#f4f7ec', w: 512, h: 256 }), 2.2, 1.1, 2.0, mats);
+  placeAlong(sign, road, sStart - 20, -6.4, 0, Math.PI);
+  g.add(sign);
+  const sign2 = signMesh(signTexture(['ASHWOOD', 'pop. 0'], { bg: '#0b3d1f', fg: '#f4f7ec', w: 512, h: 256 }), 2.2, 1.1, 2.0, mats);
+  placeAlong(sign2, road, sStart + len + 20, 6.4, 0, 0);
+  g.add(sign2);
+  return { group: g, fixtures, obstacles, pads };
+}
+
+/** Abandoned mine cut into the canyon wall: timber portal, ore cart, a lamp that should not be lit. */
+export function buildMine(road, terrain, mats, s, side) {
+  const g = new THREE.Group();
+  const p = road.at(s);
+  const off = side * (ROAD_WIDTH / 2 + 5.5);
+  const cx = p.x + p.nx * off, cz = p.z + p.nz * off, cy = p.y;
+  g.position.set(cx, cy, cz); g.rotation.y = Math.atan2(p.tx, p.tz) + (side > 0 ? -Math.PI / 2 : Math.PI / 2);
+  const dark = new THREE.Mesh(new THREE.BoxGeometry(3.6, 3.4, 6), new THREE.MeshBasicMaterial({ color: 0x000000 })); dark.position.set(0, 1.7, 3); g.add(dark);
+  for (const x of [-1.9, 1.9]) { const post = new THREE.Mesh(new THREE.BoxGeometry(0.4, 3.6, 0.4), mats.woodOld); post.position.set(x, 1.8, 0); post.castShadow = true; g.add(post); }
+  const lintel = new THREE.Mesh(new THREE.BoxGeometry(4.6, 0.5, 0.5), mats.woodOld); lintel.position.set(0, 3.7, 0); lintel.castShadow = true; g.add(lintel);
+  const plank = signMesh(signTexture(['HOLLOW No. 3', 'KEEP OUT'], { bg: '#5a4a34', fg: '#e8dcc0', w: 512, h: 200, border: false }), 2.4, 0.9, 0, mats); plank.position.set(0, 4.2, 0.3); g.add(plank);
+  const rails = new THREE.Mesh(merge([new THREE.BoxGeometry(0.06, 0.06, 9).translate(-0.45, 0.03, -1.5), new THREE.BoxGeometry(0.06, 0.06, 9).translate(0.45, 0.03, -1.5)]), mats.iron); g.add(rails);
+  const cart = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.8, 1.6), mats.panelRust); cart.position.set(0, 0.7, -3.5); cart.castShadow = true; g.add(cart);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), new THREE.MeshStandardMaterial({ color: 0xffc070, emissive: 0xffa040, emissiveIntensity: 5 })); lamp.position.set(1.6, 2.6, 0.2); g.add(lamp);
+  g.updateMatrixWorld(true);
+  const lp = new THREE.Vector3(); lamp.getWorldPosition(lp);
+  return { group: g, fixtures: [{ pos: lp, color: new THREE.Color(0xffa040), intensity: 40, range: 14, flicker: 'candle', bulb: lamp }], obstacles: [circ(g, -1.9, 0, 0.4), circ(g, 1.9, 0, 0.4), circ(g, 0, -3.5, 1.0)], pad: { x: cx + Math.cos(g.rotation.y) * 0, z: cz, r: 7, y: cy } };
+}
+
+/** Avalanche debris: snow mounds and boulders spilled across the road for ~90 m. Weave through. */
+export function buildAvalanche(road, terrain, mats, s) {
+  const g = new THREE.Group();
+  const obstacles = [];
+  const rnd = mulberry32(9090);
+  const mounds = [], rocks = [];
+  for (let i = 0; i < 26; i++) {
+    const ss = s + rnd() * 90;
+    const p = road.at(ss);
+    const lat = (rnd() - 0.5) * 9;
+    const size = 0.8 + rnd() * 1.6;
+    const x = p.x + p.nx * lat, z = p.z + p.nz * lat;
+    if (rnd() < 0.4) {
+      const r = new THREE.IcosahedronGeometry(size * 0.7, 1); r.translate(x, p.y + size * 0.25, z); rocks.push(r);
+      obstacles.push({ x, z, r: size * 0.7, kind: 'rock' });
+    } else {
+      const m = new THREE.SphereGeometry(size, 12, 8); m.scale(1.4, 0.55, 1.1); m.translate(x, p.y, z); mounds.push(m);
+      obstacles.push({ x, z, r: size * 1.1, kind: 'snow' });
+    }
+  }
+  if (mounds.length) { const mm = new THREE.Mesh(merge(mounds), mats.snowCap); mm.castShadow = true; mm.receiveShadow = true; g.add(mm); }
+  if (rocks.length) { const rm = new THREE.Mesh(merge(rocks), mats.rock); rm.castShadow = true; rm.receiveShadow = true; g.add(rm); }
+  const sign = signMesh(signTexture(['AVALANCHE', 'ZONE'], { bg: '#e8b800', fg: '#111', w: 256, h: 256 }), 1.3, 1.3, 2.0, mats);
+  placeAlong(sign, road, s - 70, -6.2, 0, Math.PI); g.add(sign);
+  obstacles.push({ x: sign.position.x, z: sign.position.z, r: 0.25, kind: 'sign' });
+  return { group: g, fixtures: [], obstacles };
+}
+
+/** A spruce fallen across the road. Slow down and go around on the shoulder. */
+export function buildFallenTree(road, terrain, mats, s, side) {
+  const p = road.at(s);
+  const g = new THREE.Group();
+  const len = 13;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.5, len, 9), mats.bark);
+  trunk.rotation.z = Math.PI / 2; trunk.position.y = 0.45; trunk.castShadow = true; g.add(trunk);
+  const rootBall = new THREE.Mesh(new THREE.IcosahedronGeometry(1.3, 1), mats.deadWood); rootBall.position.set(-len / 2, 0.8, 0); g.add(rootBall);
+  for (let i = 0; i < 9; i++) { const b = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.08, 1.4 + Math.random() * 1.2, 5), mats.deadWood); b.position.set(-len / 2 + 2 + i * 1.2, 0.5 + Math.random() * 0.4, (Math.random() - 0.5) * 0.6); b.rotation.set(Math.random() * 2, 0, Math.random() * 1.4 - 0.7); g.add(b); }
+  // the tree lies from the uphill shoulder across the near lane
+  const yaw = Math.atan2(p.tx, p.tz) + Math.PI / 2 + 0.25;
+  const off = side * 2.0;
+  g.position.set(p.x + p.nx * off, p.y, p.z + p.nz * off); g.rotation.y = yaw;
+  const obstacles = wallCircles(g, -len / 2 + 0.5, 0, len / 2 - 0.5, 0, 0.55, 'tree');
+  return { group: g, fixtures: [], obstacles };
+}
+
+/** Black ice sheen over the road for a stretch: a glossy transparent ribbon; the physics reads sample.ice. */
+export function buildIceSheen(road, mats, a, b) {
+  const geo = boxRibbon(road, a, b, 0, ROAD_WIDTH - 0.3, 0.05, 0.03);
+  const m = new THREE.Mesh(geo, new THREE.MeshPhysicalMaterial({ color: 0x9fb4cc, roughness: 0.03, metalness: 0.0, transparent: true, opacity: 0.35, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 2.0 }));
+  m.renderOrder = 2;
+  const g = new THREE.Group(); g.add(m);
+  const sign = signMesh(signTexture(['ICE'], { bg: '#e8b800', fg: '#111', w: 256, h: 256 }), 1.3, 1.3, 2.0, mats);
+  placeAlong(sign, road, road.samples[((a % road.count) + road.count) % road.count].s - 60, -6.2, 0, Math.PI); g.add(sign);
+  return { group: g, fixtures: [], obstacles: [{ x: sign.position.x, z: sign.position.z, r: 0.25, kind: 'sign' }] };
+}
+
+/** Abandoned convoy on the flats: cars nose to tail on the shoulder, doors open, one with hazards still blinking. */
+export function buildConvoy(road, terrain, mats, s, side, buildVehicle) {
+  const g = new THREE.Group();
+  const obstacles = [], fixtures = [];
+  const rnd = mulberry32(6161);
+  for (let i = 0; i < 5; i++) {
+    const ss = s + i * 9;
+    const p = road.at(ss);
+    const lat = side * (ROAD_WIDTH / 2 + 1.4);
+    const v = buildVehicle(rnd() < 0.5 ? 'sedan' : 'pickup', null);
+    v.position.set(p.x + p.nx * lat, terrain.heightAt(p.x + p.nx * lat, p.z + p.nz * lat) + 0.02, p.z + p.nz * lat);
+    v.rotation.y = Math.atan2(p.tx, p.tz) + (rnd() - 0.5) * 0.15;
+    v.userData.lampMat.emissiveIntensity = 0.05;
+    v.userData.glares.forEach((sp) => (sp.visible = false));
+    // snow on the roof
+    const cap = new THREE.Mesh(new THREE.BoxGeometry(v.userData.W * 0.9, 0.18, 2.0), mats.snowCap); cap.position.set(0, 1.5, -0.2); v.add(cap);
+    if (i === 2) {
+      const haz = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.12, 0.05), new THREE.MeshStandardMaterial({ color: 0x331a00, emissive: 0xffa020, emissiveIntensity: 5 })); haz.position.set(-0.62, 0.7, -v.userData.L / 2 - 0.02); v.add(haz);
+      v.updateMatrixWorld(true); const hp = new THREE.Vector3(); haz.getWorldPosition(hp);
+      fixtures.push({ pos: hp, color: new THREE.Color(0xffa020), intensity: 30, range: 12, flicker: 'beacon', bulb: haz });
+    }
+    g.add(v);
+    obstacles.push({ x: v.position.x + Math.sin(v.rotation.y) * 1.3, z: v.position.z + Math.cos(v.rotation.y) * 1.3, r: 1.3, kind: 'vehicle' }, { x: v.position.x - Math.sin(v.rotation.y) * 1.3, z: v.position.z - Math.cos(v.rotation.y) * 1.3, r: 1.3, kind: 'vehicle' });
+  }
+  return { group: g, fixtures, obstacles };
 }

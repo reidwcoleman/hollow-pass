@@ -79,6 +79,22 @@ export function buildSky(starTex) {
           vec3 acol = mix(vec3(0.05, 0.9, 0.45), vec3(0.45, 0.15, 0.8), smoothstep(0.2, 0.7, up));
           col += acol * ribbon * (0.35 + rays * 0.9) * north * uAurora * 0.9;
         }
+        // meteors: a streak every so often, hashed by time
+        {
+          float slot = floor(uTime / 9.0);
+          float ph = fract(uTime / 9.0);
+          float h1 = hash(vec2(slot, 1.7)), h2 = hash(vec2(slot, 9.3)), h3 = hash(vec2(slot, 4.1));
+          if (h3 > 0.45 && ph < 0.12 && up > 0.15) {
+            vec3 m0 = normalize(vec3(h1 * 2.0 - 1.0, 0.35 + h2 * 0.5, (h2 * 2.0 - 1.0)));
+            vec3 mdir = normalize(cross(m0, vec3(0.3, 1.0, 0.1)));
+            float along = dot(d - m0, mdir);
+            vec3 nearest = normalize(m0 + mdir * clamp(along, 0.0, 0.16 * (ph / 0.12)));
+            float dd = length(d - nearest);
+            float head = 0.16 * (ph / 0.12);
+            float tail = smoothstep(0.0, head, along) * (1.0 - smoothstep(head - 0.03, head, along));
+            col += vec3(0.9, 0.95, 1.0) * exp(-dd * 900.0) * tail * (1.0 - ph / 0.12) * 3.0;
+          }
+        }
         // high veil cloud, drifts slowly, lit faintly by the moon
         if (up > 0.0) {
           vec2 cp = d.xz / (up + 0.15);
