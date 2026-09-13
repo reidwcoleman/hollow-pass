@@ -120,10 +120,20 @@ export class Road {
     const dx = x - s.x, dz = z - s.z;
     const along = dx * s.tx + dz * s.tz;
     const lateral = dx * s.nx + dz * s.nz;
-    const nxt = this.samples[(best + (along >= 0 ? 1 : this.count - 1)) % this.count];
-    const f = clamp(Math.abs(along) / 4, 0, 1);
-    const y = lerp(s.y, nxt.y, f);
+    const y = this.heightAtS(s.s + along);
     return { i: best, d: Math.abs(lateral), lateral, y, s: s.s + along, along, sample: s };
+  }
+
+  /** Smooth (Catmull-Rom) road height at station s — no kinks at sample joints. */
+  heightAtS(s) {
+    const L = this.length, N = this.count;
+    const u = ((s % L) + L) % L;
+    const f = u / 4;
+    const i = Math.floor(f) % N;
+    const k = f - Math.floor(f);
+    const y0 = this.samples[(i - 1 + N) % N].y, y1 = this.samples[i].y, y2 = this.samples[(i + 1) % N].y, y3 = this.samples[(i + 2) % N].y;
+    const k2 = k * k, k3 = k2 * k;
+    return 0.5 * ((2 * y1) + (-y0 + y2) * k + (2 * y0 - 5 * y1 + 4 * y2 - y3) * k2 + (-y0 + 3 * y1 - 3 * y2 + y3) * k3);
   }
 
   at(s) {
@@ -134,7 +144,7 @@ export class Road {
     const k = f - Math.floor(f);
     const a = this.samples[i], b = this.samples[j];
     return {
-      x: lerp(a.x, b.x, k), y: lerp(a.y, b.y, k), z: lerp(a.z, b.z, k),
+      x: lerp(a.x, b.x, k), y: this.heightAtS(s), z: lerp(a.z, b.z, k),
       tx: lerp(a.tx, b.tx, k), tz: lerp(a.tz, b.tz, k), nx: lerp(a.nx, b.nx, k), nz: lerp(a.nz, b.nz, k),
       curv: lerp(a.curv, b.curv, k),
     };

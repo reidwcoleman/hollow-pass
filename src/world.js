@@ -161,6 +161,7 @@ export class World {
     this._snow();
     this._valleyFog();
     this._groundFog();
+    this._studs();
 
     progress('Ready', 1);
   }
@@ -693,6 +694,45 @@ export class World {
     }
   }
 
+  /** Road studs on the centre line and edges. Their brightness is set per frame from the car's headlight geometry (retro-reflection). */
+  _studs() {
+    const road = this.road, N = road.count;
+    const positions = [];
+    for (let i = 0; i < N; i += 3) {
+      const s = road.samples[i];
+      if (s.tunnel) continue;
+      positions.push([s.x, s.y + 0.05, s.z, 1]);                               // centre: amber
+      positions.push([s.x + s.nx * (ROAD_WIDTH / 2 - 0.3), s.y + 0.05, s.z + s.nz * (ROAD_WIDTH / 2 - 0.3), 0]);
+      positions.push([s.x - s.nx * (ROAD_WIDTH / 2 - 0.3), s.y + 0.05, s.z - s.nz * (ROAD_WIDTH / 2 - 0.3), 0]);
+    }
+    const n = positions.length;
+    const geo = new THREE.BufferGeometry();
+    const pos = new Float32Array(n * 3), kind = new Float32Array(n);
+    positions.forEach((p, i) => { pos[i * 3] = p[0]; pos[i * 3 + 1] = p[1]; pos[i * 3 + 2] = p[2]; kind[i] = p[3]; });
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('kind', new THREE.BufferAttribute(kind, 1));
+    const mat = new THREE.ShaderMaterial({
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      uniforms: { uLamp: { value: new THREE.Vector3() }, uDir: { value: new THREE.Vector3(0, 0, 1) }, uOn: { value: 1 }, uPR: { value: Math.min(window.devicePixelRatio, 1.5) }, uSprite: { value: T.glowSprite(64, 0, 'rgba(255,255,255,1)') } },
+      vertexShader: `attribute float kind; uniform vec3 uLamp; uniform vec3 uDir; uniform float uOn; uniform float uPR; varying float vI; varying float vK;
+        void main(){
+          vec3 d = position - uLamp; float dist = length(d); vec3 dn = d / max(dist, 0.01);
+          float cone = smoothstep(0.86, 0.985, dot(dn, uDir));                   // inside the low beam
+          float fall = 1.0 / (1.0 + dist * dist * 0.0009);
+          float near = smoothstep(2.0, 6.0, dist);
+          vI = cone * fall * near * uOn; vK = kind;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = (1.5 + vI * 3.5) * uPR * 42.0 / max(-mv.z, 1.0);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: `uniform sampler2D uSprite; varying float vI; varying float vK;
+        void main(){ vec4 s = texture2D(uSprite, gl_PointCoord); vec3 c = vK > 0.5 ? vec3(1.0, 0.75, 0.25) : vec3(0.9, 0.95, 1.0); float a = s.a * vI * 1.6; if (a < 0.003) discard; gl_FragColor = vec4(c * a, a); }`,
+    });
+    this.studs = new THREE.Points(geo, mat);
+    this.studs.frustumCulled = false;
+    this.scene.add(this.studs);
+  }
+
   _valleyFog() {
     // Two drifting cloud decks that sit in the valleys; from the pass they read as a sea of cloud.
     const road = this.road;
@@ -735,6 +775,7 @@ export class World {
     this.snow.material.uniforms.uCenter.value.copy(camPos);
     this.snow.material.uniforms.uLampPos.value.copy(headLampPos);
     this.snow.material.uniforms.uLampDir.value.copy(headLampDir);
+    if (this.studs) { this.studs.material.uniforms.uLamp.value.copy(headLampPos); this.studs.material.uniforms.uDir.value.copy(headLampDir); }
     for (const d of this.fogDecks) { d.material.uniforms.uTime.value = t; d.material.uniforms.uCam.value.copy(camPos); }
     if (this.wisps) for (const sp of this.wisps) {
       const u = sp.userData; const dx = sp.position.x - carPos.x, dz = sp.position.z - carPos.z;

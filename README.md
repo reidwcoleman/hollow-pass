@@ -1,5 +1,10 @@
 # Hollow Pass
 
+**Now: a first-person Iron Man sortie.** Suit up on the Stark pad by the summit mast and fly the whole valley: hover, thrust along your view, strafe, afterburner, bank into turns, land anywhere, fire repulsors (left click / right click), thread the 16-ring course above the loop, fly through cloud banks, and find every landmark on the visor HUD (horizon ladder, airspeed and altitude tapes, compass, reactor and thrust bars, radar, waypoints). Road traffic keeps driving below you. `car.html` still has the night-drive car game.
+
+Flight keys: mouse look · W/S thrust · A/D strafe · Space lift · C descend · Shift afterburner · click repulsors · R return to pad · M mute.
+
+
 A night drive over a cold mountain pass. County Route 9: a 9.9 km loop of dark, icy road through old-growth forest, a rock canyon with an abandoned mine, a frozen lake with a black-ice stretch, exposed alpine flats with an avalanche zone and an abandoned convoy, a knife-edge ridge, a dead village, a burnt forest, two gorge bridges, two tunnels, a gas station, a cemetery and a summit overlook under the aurora. Other traffic works the road at night: oncoming cars, slow pickups to overtake, a snowplough. Things stand by the road. They are not there when you get close. Some of them follow.
 
 Play it: https://reidwcoleman.github.io/hollow-pass/

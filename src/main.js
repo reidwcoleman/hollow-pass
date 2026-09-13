@@ -130,7 +130,7 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Enter' && window.__ready) start();
   if (!started) return;
   if (e.code === 'KeyV') camMode = (camMode + 1) % 3;
-  if (e.code === 'KeyH') { headlights = !headlights; carMesh.setHeadlights(headlights); events.setHeadlightsWanted(headlights); }
+  if (e.code === 'KeyH') { headlights = !headlights; carMesh.setHeadlights(headlights); events.setHeadlightsWanted(headlights); if (world.studs) world.studs.material.uniforms.uOn.value = headlights ? 1 : 0; }
   if (e.code === 'KeyM') { muted = !muted; if (audio.master) audio.master.gain.value = muted ? 0 : 0.7; }
   if (e.code === 'KeyR') { physics.placeOnRoad(physics.roadS, -2.2); physics.pitch = physics.roll = 0; }
 });
@@ -313,7 +313,7 @@ function loop(now) {
   audio.update(dt || 0.016, physics, ctx);
   hud.update(dt || 0.016, physics, ctx);
   // exposure: darker in the tunnel entrance, a touch brighter at the summit
-  fx.renderer.toneMappingExposure = lerp(fx.renderer.toneMappingExposure, ctx.inTunnel ? 1.0 : 1.15, 0.02);
+  fx.renderer.toneMappingExposure = lerp(fx.renderer.toneMappingExposure, ctx.inTunnel ? 1.15 : 1.35, 0.02);
   drawGlass(dt || 0.016);
   _t = P();
   // shadow maps once per frame, shared by the main pass and the mirror

@@ -33,8 +33,8 @@ export class PostFX {
     const r = this.renderer;
     r.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     r.outputColorSpace = THREE.SRGBColorSpace;
-    r.toneMapping = THREE.ACESFilmicToneMapping;
-    r.toneMappingExposure = 1.15;
+    r.toneMapping = THREE.AgXToneMapping;
+    r.toneMappingExposure = 1.35;
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFSoftShadowMap;
     r.setClearColor(0x000000, 1);
@@ -43,8 +43,8 @@ export class PostFX {
     this.composer = new EffectComposer(r, { frameBufferType: THREE.HalfFloatType, multisampling: 0 });
     this.composer.addPass(new RenderPass(scene, camera));
 
-    this.bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 0.72, luminanceSmoothing: 0.25, intensity: 1.35, radius: 0.85 });
-    this.vignette = new VignetteEffect({ darkness: 0.55, offset: 0.25 });
+    this.bloom = new BloomEffect({ mipmapBlur: true, luminanceThreshold: 0.85, luminanceSmoothing: 0.3, intensity: 0.55, radius: 0.7 });
+    this.vignette = new VignetteEffect({ darkness: 0.4, offset: 0.3 });
     this.noise = new NoiseEffect({ blendFunction: BlendFunction.SOFT_LIGHT, premultiply: false });
     this.noise.blendMode.opacity.value = 0.11;
     this.grade = new HueSaturationEffect({ saturation: -0.08, hue: 0 });
@@ -69,8 +69,8 @@ export class PostFX {
   tick(dt) {
     this.glitch = (this.glitch || 0) * Math.exp(-dt * 5);
     const g = this.glitch;
-    this.ca.offset.set(0.0009 + g * 0.012, 0.0006 + g * 0.008);
-    this.noise.blendMode.opacity.value = 0.11 + g * 0.6;
+    this.ca.offset.set(0.0002 + g * 0.012, 0.0001 + g * 0.008);
+    this.noise.blendMode.opacity.value = 0.07 + g * 0.6;
   }
   setScale(s) { this.scale = THREE.MathUtils.clamp(s, 0.5, 1); this.resize(); }
   render(dt) { this.tick(dt); this.renderer.info.reset(); this.composer.render(dt); }

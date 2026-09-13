@@ -8,8 +8,8 @@
   :root { --ink: #dfe6f2; --dim: rgba(223,230,242,.55); }
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font-family: "Helvetica Neue", Helvetica, Inter, Arial, sans-serif; color: var(--ink); }
   canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
-  #hud2d { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transition: opacity .8s ease; }
-  #hud2d.on { opacity: 1; }
+  #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity 1.2s ease; }
+  #hud.on { opacity: 1; }
   #speedo { position: absolute; left: 34px; bottom: 28px; display: flex; align-items: baseline; gap: 10px; text-shadow: 0 2px 14px rgba(0,0,0,.8); }
   #speed { font-size: 64px; font-weight: 200; letter-spacing: -2px; font-variant-numeric: tabular-nums; }
   #speedo .u { font-size: 13px; letter-spacing: 3px; color: var(--dim); text-transform: uppercase; }
@@ -48,16 +48,26 @@
 </head>
 <body>
 <canvas id="c"></canvas>
-<canvas id="hud2d"></canvas>
+<div id="hud">
+  <div id="radio">88.1 FM   ▮▯▯▯▯▯▯▯   no signal</div>
+  <div id="clock">02:47</div>
+  <div id="loc"><div id="locName"></div><div id="locSub"></div></div>
+  <div id="speedo"><span id="speed">0</span><span class="u">km/h</span><span id="gear">N</span></div>
+  <div id="env"><div><b id="alt">0 m</b> &nbsp;elev</div><div><b id="temp">-12.0°C</b> &nbsp;outside</div></div>
+  <div id="hint">W / ↑ accelerate · S / ↓ brake · space handbrake · V camera · H lights · R recover</div>
+</div>
+<canvas id="glass"></canvas>
+<div id="blink"></div>
+<div id="mirror"></div>
 <div id="flash"></div>
 <div id="title">
   <h1>Hollow Pass</h1>
-  <div class="tag">mark vii · night sortie over county route 9</div>
+  <div class="tag">a night drive · county route 9</div>
   <div id="bar"><i></i></div>
   <div id="status">loading</div>
-  <div id="start">Suit Up</div>
-  <div id="keys"><span><b>mouse</b> look</span><span><b>W A S D</b> thrust</span><span><b>space</b> lift</span><span><b>C</b> descend</span><span><b>shift</b> afterburner</span><span><b>click</b> repulsor</span><span><b>R</b> return to pad</span></div>
+  <div id="start">Drive</div>
+  <div id="keys"><span><b>W A S D</b> drive</span><span><b>space</b> handbrake</span><span><b>V</b> camera</span><span><b>H</b> headlights</span><span><b>R</b> recover</span></div>
 </div>
-<script type="module" src="./src/flight.js"></script>
+<script type="module" src="./src/main.js"></script>
 </body>
 </html>

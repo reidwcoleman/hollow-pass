@@ -168,6 +168,7 @@ export class GameAudio {
   }
   /** Radio voice through the static: browser speech synthesis, pitched down and slowed. */
   say(text) {
+    return; // voice removed: the radio only carries static, tones and the music box
     try {
       if (!('speechSynthesis' in window)) return;
       const u = new SpeechSynthesisUtterance(text);
@@ -222,6 +223,7 @@ export class GameAudio {
   }
   /** Whispered word, close and quiet. */
   whisper(text) {
+    return;
     try {
       if (!('speechSynthesis' in window)) return;
       const u = new SpeechSynthesisUtterance(text);

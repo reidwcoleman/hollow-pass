@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { clamp, lerp } from './noise.js';
+import { headlampCookie } from './textures.js';
 const _v = new THREE.Vector3();
 
 /**
@@ -134,19 +135,27 @@ export function buildCar(tex, envMap) {
 
   // wheels
   const wheels = [];
-  const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.3, 32, 1, false);
+  // tyre: lathe profile (rounded shoulders, slight sidewall bulge); rim: dished with six spokes and lug nuts
+  const prof = [];
+  const pts = [[0.27, -0.16], [0.30, -0.165], [0.36, -0.15], [0.405, -0.11], [0.42, -0.06], [0.42, 0.06], [0.405, 0.11], [0.36, 0.15], [0.30, 0.165], [0.27, 0.16]];
+  for (const [r, y] of pts) prof.push(new THREE.Vector2(r, y));
+  const wheelGeo = new THREE.LatheGeometry(prof, 36);
   wheelGeo.rotateZ(Math.PI / 2);
-  const rimGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.31, 8, 1, false);
-  rimGeo.rotateZ(Math.PI / 2);
-  const spokeGeo = new THREE.BoxGeometry(0.32, 0.06, 0.16);
+  const rimGeo = new THREE.CylinderGeometry(0.27, 0.27, 0.06, 24, 1, false); rimGeo.translate(0, 0.1, 0); rimGeo.rotateZ(Math.PI / 2);
+  const dishGeo = new THREE.CylinderGeometry(0.24, 0.27, 0.16, 24, 1, true); dishGeo.rotateZ(Math.PI / 2);
+  const spokeGeo = new THREE.BoxGeometry(0.06, 0.05, 0.19);
   for (const [xx, zz] of [[-0.95, 1.5], [0.95, 1.5], [-0.95, -1.45], [0.95, -1.45]]) {
     const w = new THREE.Group();
     w.rotation.order = 'YXZ';
     w.position.set(xx, 0.42, zz);
     const t = new THREE.Mesh(wheelGeo, tyre); t.castShadow = true; w.add(t);
-    const r = new THREE.Mesh(rimGeo, steel); w.add(r);
-    for (let i = 0; i < 5; i++) { const sp = new THREE.Mesh(spokeGeo, steel); sp.rotation.x = (i / 5) * Math.PI * 2; sp.position.x = xx > 0 ? 0.06 : -0.06; w.add(sp); }
-    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.36, 12), plastic); hub.rotation.z = Math.PI / 2; w.add(hub);
+    const out = xx > 0 ? 1 : -1;
+    const r = new THREE.Mesh(rimGeo, steel); r.scale.x = out; w.add(r);
+    const dish = new THREE.Mesh(dishGeo, steel); dish.material = steel; w.add(dish);
+    for (let i = 0; i < 6; i++) { const sp = new THREE.Mesh(spokeGeo, steel); sp.rotation.x = (i / 6) * Math.PI * 2; sp.position.x = out * 0.1; sp.position.y = Math.cos((i / 6) * Math.PI * 2) * 0.13; sp.position.z = Math.sin((i / 6) * Math.PI * 2) * 0.13; w.add(sp); }
+    for (let i = 0; i < 6; i++) { const nut = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.02, 6), steel); nut.rotation.z = Math.PI / 2; nut.position.set(out * 0.145, Math.cos(i / 6 * 6.283) * 0.06, Math.sin(i / 6 * 6.283) * 0.06); w.add(nut); }
+    const hub = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.3, 12), plastic); hub.rotation.z = Math.PI / 2; w.add(hub);
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.19, 0.02, 24), new THREE.MeshStandardMaterial({ color: 0x5a5a5a, metalness: 0.9, roughness: 0.5 })); disc.rotation.z = Math.PI / 2; disc.position.x = -out * 0.02; w.add(disc);
     w.userData.base = new THREE.Vector3(xx, 0.42, zz);
     body.add(w);
     wheels.push(w);
@@ -168,12 +177,14 @@ export function buildCar(tex, envMap) {
   }
   // Real lights. Two spots for the beams + one wide fill so the near road isn't a pinpoint.
   const lights = [];
+  const cookie = headlampCookie();
   for (const xx of [-0.65, 0.65]) {
-    const s = new THREE.SpotLight(0xfff0d0, 1700, 160, 0.40, 0.5, 1.7);
+    const s = new THREE.SpotLight(0xfff0d0, 4200, 190, 0.5, 0.3, 1.45);
     s.position.set(xx, 0.95, L / 2 + 0.05);
-    s.target.position.set(xx * 1.4, -0.6, 45);
-    s.castShadow = xx > 0; // one shadow-casting beam is enough and halves the cost
-    s.shadow.mapSize.set(1536, 1536);
+    s.target.position.set(xx * 1.3, -0.55, 40);
+    s.castShadow = true;            // a projected cookie needs the shadow camera
+    s.map = cookie;
+    s.shadow.mapSize.set(xx > 0 ? 1536 : 768, xx > 0 ? 1536 : 768);
     s.shadow.bias = -0.0008;
     s.shadow.normalBias = 0.02;
     s.shadow.camera.near = 1; s.shadow.camera.far = 120;
@@ -216,7 +227,7 @@ export function buildCar(tex, envMap) {
   return {
     group: car, body, wheels, lights, fill, beams, beamMat, lamps, tails, tailGlow, headLampMat, tailLampMat, lightBarLens, amberMat, paint, wipers, snowMat,
     setHeadlights(on) {
-      for (const l of lights) l.intensity = on ? 1700 : 0;
+      for (const l of lights) l.intensity = on ? 4200 : 0;
       fill.intensity = on ? 350 : 0;
       headLampMat.emissiveIntensity = on ? 10 : 0.05;
       beamMat.uniforms.uStrength.value = on ? 1 : 0;
@@ -399,12 +410,12 @@ export class CarPhysics {
     const ground = (hf + hb + hl + hr) / 4;
     const targetPitch = Math.atan2(hf - hb, 3.0);
     const targetRoll = Math.atan2(hl - hr, 1.9);
-    const k = 1 - Math.exp(-dt * 10);
+    const k = 1 - Math.exp(-dt * 6);
     this.pitch = lerp(this.pitch, targetPitch, k);
     this.roll = lerp(this.roll, targetRoll, k);
     // vertical: follow ground with spring so bumps feel like suspension
     const dy = ground - this.pos.y;
-    if (dy > 0) this.pos.y += dy * Math.min(1, dt * 14); else { this.vy = (this.vy || 0) - 9.81 * dt; this.pos.y = Math.max(ground, this.pos.y + this.vy * dt); if (this.pos.y <= ground) this.vy = 0; this.airborne = this.pos.y > ground + 0.3; }
+    if (dy > 0) this.pos.y += dy * Math.min(1, dt * (this.onRoad ? 8 : 14)); else { this.vy = (this.vy || 0) - 9.81 * dt; this.pos.y = Math.max(ground, this.pos.y + this.vy * dt); if (this.pos.y <= ground) this.vy = 0; this.airborne = this.pos.y > ground + 0.3; }
     if (dy > -0.05) this.vy = 0;
 
     this.wheelSpin += this.speed * dt / WHEEL_R;

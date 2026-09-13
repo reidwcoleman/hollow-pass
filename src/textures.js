@@ -415,3 +415,26 @@ export function frostTexture() {
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
+
+/** Low-beam headlight cookie: sharp horizontal cutoff, hot spot low and slightly right, soft edges. */
+export function headlampCookie() {
+  const S = 512;
+  const c = canvas(S, S);
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const u = (x / S) * 2 - 1, v = (y / S) * 2 - 1; // v: -1 top .. +1 bottom (projected: +v is down the road nearer)
+    const r = Math.hypot(u, v);
+    let a = smoothstep(1.0, 0.55, r);                       // round falloff
+    const cutoff = smoothstep(-0.12, 0.02, v + 0.18 * Math.max(0, u)); // sharp top cutoff, stepped up on the kerb side
+    a *= 0.12 + 0.88 * cutoff;
+    const hot = Math.exp(-((u - 0.12) * (u - 0.12) + (v - 0.15) * (v - 0.15)) * 5.0);
+    a = clamp(a * (0.55 + hot * 0.9), 0, 1);
+    const i = (y * S + x) * 4;
+    img.data[i] = img.data[i + 1] = img.data[i + 2] = a * 255; img.data[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.minFilter = THREE.LinearMipmapLinearFilter; t.generateMipmaps = true;
+  return t;
+}
