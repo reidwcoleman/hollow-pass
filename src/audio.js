@@ -204,6 +204,34 @@ export class GameAudio {
     const g2 = C.createGain(); g2.gain.setValueAtTime(0.0001, t); g2.gain.exponentialRampToValueAtTime(0.3, t + 0.3); g2.gain.exponentialRampToValueAtTime(0.0001, t + 2.6);
     o.connect(lp); lp.connect(g2); g2.connect(this.master); o.start(t); o.stop(t + 2.7);
   }
+  /** A slow, detuned music box through the static, with wrong notes. */
+  musicBox(sec = 12) {
+    if (!this.started) return;
+    const C = this.ctx, t0 = C.currentTime;
+    const notes = [523, 659, 784, 659, 523, 440, 392, 440, 523, 659, 587, 523, 494, 440, 392, 349];
+    let t = t0 + 0.4;
+    for (let i = 0; i < notes.length * 2 && t < t0 + sec; i++) {
+      const n = notes[i % notes.length] * (Math.random() < 0.12 ? 0.94 : 1) * 0.5;
+      for (const [mult, v] of [[1, 0.12], [2, 0.05], [3.01, 0.02]]) {
+        const o = C.createOscillator(); o.type = 'sine'; o.frequency.value = n * mult * (1 + (Math.random() - 0.5) * 0.004);
+        const g = C.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(v, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 1.4);
+        o.connect(g); g.connect(this.conv); g.connect(this.master); o.start(t); o.stop(t + 1.5);
+      }
+      t += 0.55 + (Math.random() < 0.15 ? 0.6 : 0);
+    }
+  }
+  /** Whispered word, close and quiet. */
+  whisper(text) {
+    try {
+      if (!('speechSynthesis' in window)) return;
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.15; u.pitch = 0.05; u.volume = 0.22;
+      const voices = speechSynthesis.getVoices();
+      const pick = voices.find((v) => /en/i.test(v.lang) && /female|samantha|victoria|karen|moira|google uk english female/i.test(v.name)) || voices.find((v) => /en/i.test(v.lang));
+      if (pick) u.voice = pick;
+      speechSynthesis.speak(u);
+    } catch (e) { /* none */ }
+  }
   horn() {
     if (!this.started) return;
     const C = this.ctx, t = C.currentTime;

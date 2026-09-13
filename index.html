@@ -18,11 +18,12 @@
   #env b { color: var(--ink); font-weight: 300; font-size: 16px; }
   #radio { position: absolute; left: 34px; top: 28px; font-size: 11px; letter-spacing: 2px; color: rgba(255,160,90,.7); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
   #clock { position: absolute; right: 34px; top: 28px; font-size: 13px; letter-spacing: 3px; color: var(--dim); font-variant-numeric: tabular-nums; }
-  #loc { position: absolute; left: 50%; top: 14%; transform: translateX(-50%); text-align: center; opacity: 0; }
+  #loc { position: absolute; left: 50%; top: 23%; transform: translateX(-50%); text-align: center; opacity: 0; }
   #loc.show { animation: loc 6.5s ease forwards; }
   @keyframes loc { 0% { opacity: 0; transform: translate(-50%, 8px);} 12% { opacity: 1; transform: translate(-50%, 0);} 80% { opacity: 1;} 100% { opacity: 0;} }
   #locName { font-size: 34px; font-weight: 200; letter-spacing: 8px; text-transform: uppercase; text-shadow: 0 2px 24px rgba(0,0,0,.9); }
   #locSub { font-size: 12px; letter-spacing: 4px; color: var(--dim); text-transform: uppercase; margin-top: 8px; }
+  #mirror { position: fixed; display: none; pointer-events: none; border: 2px solid rgba(20,22,26,.95); border-radius: 6px; box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 8px 30px rgba(0,0,0,.6), inset 0 0 18px rgba(0,0,0,.55); z-index: 3; }
   #blink { position: fixed; inset: 0; background: #000; opacity: 0; pointer-events: none; transition: opacity .08s; z-index: 4; }
   #glass { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; opacity: 0; transition: opacity .6s; }
   #glass.on { opacity: 1; }
@@ -57,6 +58,7 @@
 </div>
 <canvas id="glass"></canvas>
 <div id="blink"></div>
+<div id="mirror"></div>
 <div id="flash"></div>
 <div id="title">
   <h1>Hollow Pass</h1>

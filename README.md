@@ -38,9 +38,10 @@ Touch: left/right half of the screen steers, top 70% accelerates, bottom brakes.
 - `src/collision.js` – obstacle field: every tree, rock, post, sign, building and vehicle is solid; the car is pushed out and loses speed.
 - `src/traffic.js` – oncoming and same-direction vehicles with headlight glare, the plough, ghosts and the follower.
 - `src/particles.js` – snow spray from the wheels, exhaust vapour.
-- `src/events.js` / `src/scares2.js` – sections, scares (tunnel figure, bridge jumper, engine stall, the tall one, whiteout, the lantern on the ice, the follower and the ram, vanishing oncoming cars, the wrong-way driver, the tunnel blackout and the ones on the walkways, the snowman that gets closer, the blink, the sitter on the fallen tree, the blood moon, the phone box, 03:33, the runner, the breathing when you stop, the numbers station, the ore cart, the avalanche, the convoy, cracking ice, handprints, the radio voice), mood (fog, aurora, dread, heartbeat, static).
+- `src/mirror.js` – a real rear-view mirror: the world rendered from a camera on the tailgate into a small target and blitted, flipped, into the top of the screen; objects on layer 3 exist only in the mirror.
+- `src/events.js` / `src/scares2.js` – sections, scares (tunnel figure, bridge jumper, engine stall, the tall one, whiteout, the lantern on the ice, the follower and the ram, vanishing oncoming cars, the wrong-way driver, the tunnel blackout and the ones on the walkways, the snowman that gets closer, the blink, the sitter on the fallen tree, the blood moon, the phone box, 03:33, the runner, the breathing when you stop, the numbers station, the ore cart, the avalanche, the convoy, cracking ice, handprints, the radio voice; then `src/scares3.js`: the passenger in the mirror, the one standing behind you, the hanged one, scarecrows that turn, the pack, the wreck in the gorge, signs that change on the second lap, the music box, whispers), mood (fog, aurora, dread, heartbeat, static).
 - `src/audio.js` – synthesized engine, wind, tyres, drone, bell, stings.
-- `src/postfx.js` – HDR bloom, grade, vignette, grain, chromatic aberration, SMAA.
+- `src/postfx.js` – HDR bloom, cold film grade (blue shadows, warm highlights, S-curve), vignette, grain, chromatic aberration glitches, SMAA.
 
 ## Debugging
 

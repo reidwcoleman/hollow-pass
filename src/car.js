@@ -62,7 +62,8 @@ export function buildCar(tex, envMap) {
   const glassSide = loft([[-1.9, 1.24], [-1.86, 1.8], [-1.72, 1.84], [0.5, 1.84], [0.86, 1.78], [1.3, 1.26]], W * 0.9 + 0.03, 0.02, glass, 0, 2);
   glassSide.material = glass;
   add(new THREE.PlaneGeometry(W * 0.78, 0.62), glass, 0, 1.55, 1.19, -0.6);       // windscreen
-  add(new THREE.PlaneGeometry(W * 0.74, 0.55), glass, 0, 1.52, -2.0, 0.08, Math.PI); // tailgate glass
+  const rearGlass = glass.clone(); rearGlass.roughness = 0.22; rearGlass.clearcoatRoughness = 0.25; rearGlass.envMapIntensity = 0.8;
+  add(new THREE.PlaneGeometry(W * 0.74, 0.55), rearGlass, 0, 1.52, -2.0, 0.08, Math.PI); // tailgate glass
   // pillars: dark strips so the glass reads as panes
   for (const zz of [-1.62, -0.55, 0.42]) add(new THREE.BoxGeometry(W * 0.92 + 0.02, 0.62, 0.06), paintDark, 0, 1.54, zz);
   // wheel arches: dark flared lips, and the arch cavity darkness behind them
@@ -115,8 +116,21 @@ export function buildCar(tex, envMap) {
   add(new RoundedBoxGeometry(0.5, 0.6, 0.45, 2, 0.1), plastic, 0.42, 1.35, -0.2);
   add(new RoundedBoxGeometry(0.5, 0.6, 0.45, 2, 0.1), plastic, -0.42, 1.35, -0.2);
   add(new THREE.TorusGeometry(0.17, 0.02, 8, 24), plastic, 0.42, 1.38, 0.45, -0.3);
-  // wipers
-  for (const xx of [-0.25, 0.35]) add(new THREE.BoxGeometry(0.02, 0.02, 0.5), rubber, xx, 1.26, 1.14, -0.6, 0, 0.35);
+  // wipers (pivoted groups so they can sweep)
+  const wipers = [];
+  for (const xx of [-0.3, 0.3]) {
+    const pivot = new THREE.Group(); pivot.position.set(xx, 1.24, 1.16); pivot.rotation.x = -0.6; body.add(pivot);
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.52, 0.02), rubber); arm.position.y = 0.26; pivot.add(arm);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.02, 0.06), rubber); blade.position.y = 0.5; pivot.add(blade);
+    pivot.rotation.z = 0.35; wipers.push(pivot);
+  }
+  // snow that accumulates on the roof, hood and rack while it snows (opacity driven from main)
+  const snowMat = new THREE.MeshStandardMaterial({ color: 0xdfe7f4, roughness: 0.9, transparent: true, opacity: 0.0 });
+  const snowCaps = [];
+  snowCaps.push(add(new RoundedBoxGeometry(W * 0.84, 0.08, 2.3, 3, 0.04), snowMat, 0, 1.99, -0.35));
+  snowCaps.push(add(new RoundedBoxGeometry(W * 0.8, 0.06, 1.2, 3, 0.03), snowMat, 0, 1.23, 1.45));
+  snowCaps.push(add(new RoundedBoxGeometry(1.0, 0.05, 0.2, 2, 0.02), snowMat, 0, 2.06, 0.45));
+  for (const c of snowCaps) c.castShadow = false;
 
   // wheels
   const wheels = [];
@@ -200,7 +214,7 @@ export function buildCar(tex, envMap) {
   }
 
   return {
-    group: car, body, wheels, lights, fill, beams, beamMat, lamps, tails, tailGlow, headLampMat, tailLampMat, lightBarLens, amberMat, paint,
+    group: car, body, wheels, lights, fill, beams, beamMat, lamps, tails, tailGlow, headLampMat, tailLampMat, lightBarLens, amberMat, paint, wipers, snowMat,
     setHeadlights(on) {
       for (const l of lights) l.intensity = on ? 1700 : 0;
       fill.intensity = on ? 350 : 0;

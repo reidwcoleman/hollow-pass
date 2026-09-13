@@ -1,8 +1,30 @@
 import * as THREE from 'three';
 import {
+  Effect,
   BloomEffect, BlendFunction, ChromaticAberrationEffect, EffectComposer, EffectPass, NoiseEffect,
   RenderPass, SMAAEffect, VignetteEffect, DepthOfFieldEffect, BrightnessContrastEffect, HueSaturationEffect,
 } from 'postprocessing';
+
+/** Cold film grade: blue lifted shadows, warm highlights, gentle S-curve, slight desaturation in the dark. */
+class GradeEffect extends Effect {
+  constructor() {
+    super('GradeEffect', `
+      uniform float uAmount;
+      vec3 sCurve(vec3 c) { return c * c * (3.0 - 2.0 * c); }
+      void mainImage(const in vec4 inputColor, const in vec2 uv, out vec4 outputColor) {
+        vec3 c = inputColor.rgb;
+        float l = dot(c, vec3(0.299, 0.587, 0.114));
+        vec3 shadowTint = vec3(0.86, 0.93, 1.12);
+        vec3 highTint = vec3(1.06, 1.0, 0.93);
+        vec3 tint = mix(shadowTint, highTint, smoothstep(0.15, 0.75, l));
+        c *= tint;
+        c = mix(c, sCurve(clamp(c, 0.0, 1.0)), 0.35);
+        c = mix(vec3(l), c, mix(0.8, 1.05, smoothstep(0.05, 0.5, l)));
+        c += vec3(0.010, 0.014, 0.024); // lifted blacks, cold
+        outputColor = vec4(mix(inputColor.rgb, c, uAmount), inputColor.a);
+      }`, { uniforms: new Map([['uAmount', new THREE.Uniform(1.0)]]) });
+  }
+}
 
 /** Renderer + cinematic post chain: HDR bloom, subtle DoF, grain, vignette, cold grade, SMAA. */
 export class PostFX {
@@ -28,7 +50,8 @@ export class PostFX {
     this.grade = new HueSaturationEffect({ saturation: -0.08, hue: 0 });
     this.contrast = new BrightnessContrastEffect({ brightness: -0.02, contrast: 0.08 });
     this.ca = new ChromaticAberrationEffect({ offset: new THREE.Vector2(0.0009, 0.0006), radialModulation: true, modulationOffset: 0.4 });
-    this.composer.addPass(new EffectPass(camera, this.bloom, this.grade, this.contrast, this.vignette, this.noise, this.ca));
+    this.filmGrade = new GradeEffect();
+    this.composer.addPass(new EffectPass(camera, this.bloom, this.filmGrade, this.grade, this.contrast, this.vignette, this.noise, this.ca));
     this.composer.addPass(new EffectPass(camera, new SMAAEffect()));
     this.camera = camera;
     this.scale = 1;

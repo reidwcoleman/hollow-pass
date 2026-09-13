@@ -96,7 +96,7 @@ export function asphaltTextures() {
 
 /** Snow + rock detail normal (used with vertex-colour blending on the terrain). */
 export function snowTextures() {
-  const S = 512;
+  const S = 1024;
   const hf = new Float32Array(S * S);
   const alb = canvas(S, S), rough = canvas(S, S);
   const actx = alb.getContext('2d'), rctx = rough.getContext('2d');
@@ -105,7 +105,7 @@ export function snowTextures() {
     for (let x = 0; x < S; x++) {
       const u = x / S, v = y / S;
       const drift = sx.fbm(u * 5 + 10, v * 5 + 10, 4, 2, 0.5);
-      const grain = sx.fbm(x * 0.5, y * 0.5, 2, 2, 0.5);
+      const grain = sx.fbm(x * 0.25, y * 0.25, 3, 2, 0.5);
       const sparkle = 0;
       let b = 0.82 + drift * 0.08 + grain * 0.04 + sparkle * 0.15;
       b = clamp(b, 0.5, 1);

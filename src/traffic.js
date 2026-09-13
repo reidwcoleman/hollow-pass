@@ -59,7 +59,13 @@ export function buildVehicle(kind, envMap) {
   // glare billboards (two, additive)
   const spr = new THREE.SpriteMaterial({ map: lampSprite(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, color: 0xfff1d8 });
   const glares = [];
-  for (const s of [-1, 1]) { const sp = new THREE.Sprite(spr); sp.position.set(s * headX, headY, front + 0.15); sp.scale.set(1.2, 1.2, 1); g.add(sp); glares.push(sp); }
+  const streakMat = new THREE.SpriteMaterial({ map: lampSprite(), blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, color: 0x9fb8ff, opacity: 0.55 });
+  const streaks = [];
+  for (const s of [-1, 1]) {
+    const sp = new THREE.Sprite(spr); sp.position.set(s * headX, headY, front + 0.15); sp.scale.set(1.2, 1.2, 1); g.add(sp); glares.push(sp);
+    const st = new THREE.Sprite(streakMat); st.position.copy(sp.position); st.scale.set(6, 0.25, 1); g.add(st); streaks.push(st);
+  }
+  g.userData.streaks = streaks;
   g.userData.glares = glares; g.userData.L = L; g.userData.W = W; g.userData.lampMat = lampOn;
   g.userData.lampPos = new THREE.Vector3(0, headY, front); g.userData.beaconPos = new THREE.Vector3(0, 3.5, 2.2);
   return g;
@@ -159,6 +165,7 @@ export class Traffic {
       const facing = clamp(toCar.x * fx + toCar.z * fz, 0, 1);
       const gl = v.ghost ? 0 : facing * facing * clamp(dist / 25, 0.2, 1) * (v.lightsOn === false ? 0 : 1);
       for (const sp of glare) sp.scale.setScalar(0.6 + gl * (2.2 + 22 / Math.max(dist, 6)));
+      for (const st of v.mesh.userData.streaks) { st.visible = gl > 0.05; st.scale.set(gl * (8 + 40 / Math.max(dist, 6)), 0.18 + gl * 0.2, 1); }
       v.dist = dist;
       v.mesh.userData.lampMat.emissiveIntensity = v.lightsOn === false ? 0.1 : 12;
       if (v.mesh.userData.beacon) {

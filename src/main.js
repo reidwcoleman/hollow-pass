@@ -6,11 +6,13 @@ import { GameAudio } from './audio.js';
 import { Events, HUD } from './events.js';
 import { clamp, lerp } from './noise.js';
 import { Puffs } from './particles.js';
+import { Mirror } from './mirror.js';
 
 const canvas = document.getElementById('c');
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, 1, 0.3, 9000);
 camera.layers.disable(2); // layer 2 = shadow-only proxies
+camera.layers.disable(3); // layer 3 = mirror-only
 const fx = new PostFX(canvas, scene, camera);
 const world = new World(scene, fx.renderer);
 const audio = new GameAudio();
@@ -22,7 +24,8 @@ const startBtn = document.getElementById('start');
 const title = document.getElementById('title');
 const glass = document.getElementById('glass');
 const glassCtx = glass.getContext('2d');
-let frostImg = null, breath = 0, handprint = 0;
+let frostImg = null, breath = 0, handprint = 0, wipeT = 0, snowOnCar = 0, cracks = 0;
+const specks = [];
 function drawGlass(dt) {
   const on = camMode === 1;
   glass.classList.toggle('on', on);
@@ -37,6 +40,24 @@ function drawGlass(dt) {
   const spd = Math.abs(physics.speed);
   breath = clamp(breath + (spd < 1 ? dt * 0.06 : -dt * 0.15), 0, 0.5);
   if (breath > 0.01) { const g = ctx.createRadialGradient(W * 0.6, H * 0.75, 0, W * 0.6, H * 0.75, H * 0.7); g.addColorStop(0, `rgba(210,222,240,${breath})`); g.addColorStop(1, 'rgba(210,222,240,0)'); ctx.globalAlpha = 1; ctx.fillStyle = g; ctx.fillRect(0, 0, W, H); }
+  // snow specks land on the glass and get wiped
+  if (Math.random() < 0.4 + (world.snow ? world.snow.material.uniforms.uIntensity.value : 1) * 0.6) specks.push({ x: Math.random(), y: Math.random(), r: 1.5 + Math.random() * 3, a: 0.8 });
+  const sweep = Math.abs(Math.sin(wipeT * 2.4)); // 0..1 across the glass
+  for (let i = specks.length - 1; i >= 0; i--) {
+    const sp = specks[i];
+    // wiper zone: lower two-thirds; a speck is wiped when the blade passes its x
+    if (sp.y > 0.3 && Math.abs(sp.x - (0.15 + sweep * 0.7)) < 0.04) { specks.splice(i, 1); continue; }
+    sp.a -= dt * 0.05; if (sp.a <= 0) { specks.splice(i, 1); continue; }
+    ctx.globalAlpha = sp.a * 0.7; ctx.fillStyle = '#dde6f5';
+    ctx.beginPath(); ctx.arc(sp.x * W, sp.y * H, sp.r, 0, Math.PI * 2); ctx.fill();
+  }
+  if (specks.length > 400) specks.splice(0, specks.length - 400);
+  // cracks after hard impacts
+  if (cracks > 0) {
+    ctx.globalAlpha = Math.min(0.9, cracks); ctx.strokeStyle = 'rgba(220,230,245,0.8)'; ctx.lineWidth = 1.2;
+    const cx = W * 0.36, cy = H * 0.38;
+    for (let k = 0; k < 9; k++) { const a = k * 0.7 + 0.3, len = (40 + (k * 37) % 90) * cracks; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * len, cy + Math.sin(a) * len); ctx.lineTo(cx + Math.cos(a + 0.15) * len * 1.3, cy + Math.sin(a + 0.15) * len * 1.3); ctx.stroke(); }
+  }
   if (handprint > 0) {
     // a hand pressed against the outside of the glass, fading
     handprint = Math.max(0, handprint - dt * 0.12);
@@ -52,6 +73,11 @@ function drawGlass(dt) {
   ctx.globalAlpha = 1; ctx.filter = 'none';
 }
 window.__handprint = () => { handprint = 1; };
+const mirrorEl = document.getElementById('mirror');
+function mirrorFrame(on) {
+  mirrorEl.style.display = on ? 'block' : 'none';
+  if (on && mirror && mirror.rect) { const r = mirror.rect; mirrorEl.style.left = r.x + 'px'; mirrorEl.style.top = (window.innerHeight - r.y - r.h) + 'px'; mirrorEl.style.width = r.w + 'px'; mirrorEl.style.height = r.h + 'px'; }
+}
 
 const input = { throttle: 0, brake: 0, steer: 0, handbrake: false };
 const keys = new Set();
@@ -61,7 +87,7 @@ let headlights = true;
 let muted = false;
 let started = false;
 
-let car, carMesh, physics, events, spray, vapour;
+let car, carMesh, physics, events, spray, vapour, mirror;
 const _w = new THREE.Vector3(), _w2 = new THREE.Vector3();
 
 async function init() {
@@ -73,6 +99,8 @@ async function init() {
   physics.applyTo(carMesh);
   events = new Events(world, physics, carMesh, audio, hud, fx);
   spray = new Puffs(scene, 700, { color: 0xe6eef8, size: 1.6 });
+  mirror = new Mirror(fx.renderer, scene);
+  window.__mirror = mirror;
   vapour = new Puffs(scene, 300, { color: 0xb8c0cc, size: 0.6 });
   events.setHeadlightsWanted(true);
   // pre-position camera
@@ -148,7 +176,7 @@ function onImpact(strength) {
   if (now - lastHit > 250) {
     lastHit = now;
     audio.thud(strength);
-    if (strength > 0.35) { hud.pulse(); damage = Math.min(1, damage + strength * 0.25); }
+    if (strength > 0.35) { hud.pulse(); damage = Math.min(1, damage + strength * 0.25); if (strength > 0.55) cracks = Math.min(1, cracks + strength * 0.5); }
     if (strength > 0.6) events.flicker(0.3 + strength * 0.4);
   }
 }
@@ -269,6 +297,13 @@ function loop(now) {
     vapour.update(dt, 1.5, 0.6);
   }
   prof.particles += P() - _t; _t = P();
+  // wipers sweep, snow settles on the bodywork and blows off at speed
+  wipeT += dt * (started ? 1 : 0);
+  const sweepAng = Math.sin(wipeT * 2.4) * 0.55;
+  for (const w of carMesh.wipers) w.rotation.z = 0.35 + sweepAng;
+  const snowRate = world.snow ? world.snow.material.uniforms.uIntensity.value : 1;
+  snowOnCar = clamp(snowOnCar + dt * (0.012 * snowRate - Math.abs(physics.speed) * 0.0012), 0, 0.85);
+  carMesh.snowMat.opacity = snowOnCar;
   // tail lights brighten under braking
   carMesh.tailLampMat.emissiveIntensity = input.brake > 0.5 ? 9 : 2.2;
   carMesh.tailGlow.intensity = input.brake > 0.5 ? 9 : 2.5;
@@ -281,7 +316,12 @@ function loop(now) {
   fx.renderer.toneMappingExposure = lerp(fx.renderer.toneMappingExposure, ctx.inTunnel ? 1.0 : 1.15, 0.02);
   drawGlass(dt || 0.016);
   _t = P();
+  // shadow maps once per frame, shared by the main pass and the mirror
+  fx.renderer.shadowMap.autoUpdate = true;
+  if (mirror) mirror.update(carMesh.group.matrixWorld);
   fx.render(dt || 0.016);
+  if (mirror) mirror.interval = fx.scale < 0.75 ? 4 : 2;
+  if (mirror && started && camMode !== 2) { mirror.render(camera, scene.fog, window.innerWidth, window.innerHeight); mirrorFrame(true); } else mirrorFrame(false);
   prof.render += P() - _t;
   // adaptive resolution
   frames++; acc += dt;
